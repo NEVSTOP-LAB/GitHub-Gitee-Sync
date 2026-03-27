@@ -607,6 +607,602 @@ def sync_repo_metadata(source_platform, target_platform, source_owner, target_ow
 
 
 # ---------------------------------------------------------------------------
+# Extra sync modules (Releases, Wiki, Labels, Milestones, Issues)
+# ---------------------------------------------------------------------------
+
+def _get_api_url(platform, path):
+    """Build a full API URL for the given platform."""
+    if platform == "github":
+        return f"{GITHUB_API}{path}"
+    return f"{GITEE_API}{path}"
+
+
+def _api_auth(platform, token):
+    """Return auth kwargs for API requests."""
+    if platform == "github":
+        return {"headers": github_headers(token)}
+    return {"params": {"access_token": token}}
+
+
+def _api_auth_with_params(platform, token, extra_params=None):
+    """Return kwargs for API requests (headers for GitHub, params for Gitee)."""
+    kwargs = {}
+    if platform == "github":
+        kwargs["headers"] = github_headers(token)
+        if extra_params:
+            kwargs["params"] = extra_params
+    else:
+        params = {"access_token": token}
+        if extra_params:
+            params.update(extra_params)
+        kwargs["params"] = params
+    return kwargs
+
+
+def _paginated_get(platform, token, path, extra_params=None):
+    """Paginated GET for both platforms, returns all items."""
+    items = []
+    page = 1
+    while True:
+        p = {"per_page": 100, "page": page}
+        if extra_params:
+            p.update(extra_params)
+        url = _get_api_url(platform, path)
+        kwargs = _api_auth_with_params(platform, token, p)
+        resp = api_request("GET", url, max_retries=2, **kwargs)
+        if resp.status_code != 200:
+            break
+        data = resp.json()
+        if not data:
+            break
+        if isinstance(data, list):
+            items.extend(data)
+        else:
+            break
+        page += 1
+    return items
+
+
+# ---- Releases sync ----
+
+def sync_releases(source_platform, target_platform, source_owner, target_owner,
+                  source_token, target_token, repo_name):
+    """Sync releases from source to target, matched by tag_name."""
+    try:
+        src_releases = _paginated_get(
+            source_platform, source_token,
+            f"/repos/{source_owner}/{repo_name}/releases",
+        )
+        tgt_releases = _paginated_get(
+            target_platform, target_token,
+            f"/repos/{target_owner}/{repo_name}/releases",
+        )
+
+        tgt_by_tag = {r["tag_name"]: r for r in tgt_releases if r.get("tag_name")}
+
+        created = 0
+        for src_rel in src_releases:
+            tag = src_rel.get("tag_name")
+            if not tag:
+                continue
+            if tag in tgt_by_tag:
+                continue  # Already exists on target
+
+            # Create release on target
+            url = _get_api_url(
+                target_platform,
+                f"/repos/{target_owner}/{repo_name}/releases",
+            )
+            payload = {
+                "tag_name": tag,
+                "name": src_rel.get("name") or tag,
+                "body": src_rel.get("body") or "",
+                "prerelease": src_rel.get("prerelease", False),
+            }
+            if target_platform == "github":
+                payload["draft"] = src_rel.get("draft", False)
+                resp = api_request(
+                    "POST", url, headers=github_headers(target_token),
+                    json=payload, max_retries=1,
+                )
+            else:
+                payload["access_token"] = target_token
+                resp = api_request("POST", url, json=payload, max_retries=1)
+
+            if resp.status_code in (200, 201):
+                created += 1
+                # Sync release assets
+                new_release = resp.json()
+                _sync_release_assets(
+                    source_platform, target_platform,
+                    source_owner, target_owner,
+                    source_token, target_token,
+                    repo_name, src_rel, new_release,
+                )
+            else:
+                logging.warning(
+                    f"  Failed to create release {tag}: {resp.status_code}"
+                )
+
+        if created:
+            logging.info(f"  Releases synced: {created} created")
+
+    except Exception as e:
+        logging.warning(f"  Releases sync failed: {e}")
+
+
+def _sync_release_assets(source_platform, target_platform,
+                         source_owner, target_owner,
+                         source_token, target_token,
+                         repo_name, src_release, tgt_release):
+    """Sync release assets (download from source, upload to target)."""
+    assets = src_release.get("assets", [])
+    if not assets:
+        return
+
+    tgt_release_id = tgt_release.get("id")
+    if not tgt_release_id:
+        return
+
+    for asset in assets:
+        asset_name = asset.get("name", "")
+        try:
+            # Download from source
+            if source_platform == "github":
+                download_url = asset.get("browser_download_url", "")
+                if not download_url:
+                    continue
+                dl_resp = requests.get(download_url, timeout=300, stream=True)
+            else:
+                download_url = asset.get("browser_download_url", "")
+                if not download_url:
+                    continue
+                dl_resp = requests.get(
+                    download_url,
+                    params={"access_token": source_token},
+                    timeout=300,
+                    stream=True,
+                )
+
+            if dl_resp.status_code != 200:
+                logging.warning(f"  Failed to download asset {asset_name}")
+                continue
+
+            content = dl_resp.content
+
+            # Upload to target
+            if target_platform == "github":
+                upload_url = tgt_release.get("upload_url", "")
+                upload_url = upload_url.split("{")[0]  # Remove template part
+                upload_url = f"{upload_url}?name={asset_name}"
+                content_type = asset.get("content_type", "application/octet-stream")
+                up_resp = api_request(
+                    "POST", upload_url,
+                    headers={
+                        "Authorization": f"token {target_token}",
+                        "Content-Type": content_type,
+                    },
+                    data=content,
+                    max_retries=1,
+                    timeout=300,
+                )
+            else:
+                upload_url = _get_api_url(
+                    target_platform,
+                    f"/repos/{target_owner}/{repo_name}/releases/{tgt_release_id}/attach_files",
+                )
+                up_resp = api_request(
+                    "POST", upload_url,
+                    params={"access_token": target_token},
+                    files={"file": (asset_name, content)},
+                    max_retries=1,
+                    timeout=300,
+                )
+
+            if up_resp.status_code in (200, 201):
+                logging.debug(f"  Uploaded asset: {asset_name}")
+            else:
+                logging.warning(
+                    f"  Failed to upload asset {asset_name}: {up_resp.status_code}"
+                )
+        except Exception as e:
+            logging.warning(f"  Asset sync failed for {asset_name}: {e}")
+
+
+# ---- Wiki sync ----
+
+def sync_wiki(source_platform, target_platform, source_owner, target_owner,
+              source_token, target_token, repo_name):
+    """Sync wiki using git clone --mirror .wiki.git + git push --mirror.
+
+    Silently skips if source wiki does not exist.
+    """
+    try:
+        if source_platform == "github":
+            source_url = f"https://{source_token}@github.com/{source_owner}/{repo_name}.wiki.git"
+        else:
+            source_url = f"https://{source_token}@gitee.com/{source_owner}/{repo_name}.wiki.git"
+
+        if target_platform == "github":
+            target_url = f"https://{target_token}@github.com/{target_owner}/{repo_name}.wiki.git"
+        else:
+            target_url = f"https://{target_token}@gitee.com/{target_owner}/{repo_name}.wiki.git"
+
+        temp_dir = tempfile.mkdtemp(prefix=f"wiki_{repo_name}_")
+        try:
+            result = subprocess.run(
+                ["git", "clone", "--mirror", source_url, temp_dir],
+                capture_output=True, text=True, timeout=GIT_TIMEOUT,
+            )
+            if result.returncode != 0:
+                # Wiki likely does not exist — silently skip
+                logging.debug(f"  Wiki not available for {repo_name}, skipping")
+                return
+
+            result = subprocess.run(
+                ["git", "push", "--mirror", target_url],
+                cwd=temp_dir, capture_output=True, text=True, timeout=GIT_TIMEOUT,
+            )
+            if result.returncode != 0:
+                logging.warning(f"  Wiki push failed: {mask_token(result.stderr)}")
+            else:
+                logging.info(f"  Wiki synced ✓")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    except subprocess.TimeoutExpired:
+        logging.warning(f"  Wiki sync timed out")
+    except Exception as e:
+        logging.warning(f"  Wiki sync failed: {mask_token(str(e))}")
+
+
+# ---- Labels sync ----
+
+def sync_labels(source_platform, target_platform, source_owner, target_owner,
+                source_token, target_token, repo_name):
+    """Sync labels from source to target. Matched by name."""
+    try:
+        src_labels = _paginated_get(
+            source_platform, source_token,
+            f"/repos/{source_owner}/{repo_name}/labels",
+        )
+        tgt_labels = _paginated_get(
+            target_platform, target_token,
+            f"/repos/{target_owner}/{repo_name}/labels",
+        )
+
+        tgt_by_name = {l["name"]: l for l in tgt_labels if l.get("name")}
+
+        created = 0
+        updated = 0
+        for src_label in src_labels:
+            name = src_label.get("name")
+            if not name:
+                continue
+
+            color = src_label.get("color", "")
+            # Normalize color: strip leading '#' if present
+            if color.startswith("#"):
+                color = color[1:]
+            description = src_label.get("description") or ""
+
+            if name not in tgt_by_name:
+                # Create label
+                url = _get_api_url(
+                    target_platform,
+                    f"/repos/{target_owner}/{repo_name}/labels",
+                )
+                payload = {"name": name, "color": color}
+                if description:
+                    payload["description"] = description
+                if target_platform == "github":
+                    resp = api_request(
+                        "POST", url, headers=github_headers(target_token),
+                        json=payload, max_retries=1,
+                    )
+                else:
+                    payload["access_token"] = target_token
+                    resp = api_request("POST", url, json=payload, max_retries=1)
+
+                if resp.status_code in (200, 201):
+                    created += 1
+                else:
+                    logging.warning(f"  Failed to create label {name}: {resp.status_code}")
+            else:
+                # Check if update needed
+                tgt = tgt_by_name[name]
+                tgt_color = (tgt.get("color") or "").lstrip("#")
+                tgt_desc = tgt.get("description") or ""
+                if tgt_color != color or tgt_desc != description:
+                    url = _get_api_url(
+                        target_platform,
+                        f"/repos/{target_owner}/{repo_name}/labels/{name}",
+                    )
+                    payload = {"color": color}
+                    if description:
+                        payload["description"] = description
+                    if target_platform == "github":
+                        payload["new_name"] = name
+                        resp = api_request(
+                            "PATCH", url, headers=github_headers(target_token),
+                            json=payload, max_retries=1,
+                        )
+                    else:
+                        payload["access_token"] = target_token
+                        resp = api_request("PATCH", url, json=payload, max_retries=1)
+
+                    if resp.status_code in (200, 201):
+                        updated += 1
+
+        if created or updated:
+            logging.info(f"  Labels synced: {created} created, {updated} updated")
+
+    except Exception as e:
+        logging.warning(f"  Labels sync failed: {e}")
+
+
+# ---- Milestones sync ----
+
+def sync_milestones(source_platform, target_platform, source_owner, target_owner,
+                    source_token, target_token, repo_name):
+    """Sync milestones from source to target. Matched by title."""
+    try:
+        src_milestones = _paginated_get(
+            source_platform, source_token,
+            f"/repos/{source_owner}/{repo_name}/milestones",
+            extra_params={"state": "all"},
+        )
+        tgt_milestones = _paginated_get(
+            target_platform, target_token,
+            f"/repos/{target_owner}/{repo_name}/milestones",
+            extra_params={"state": "all"},
+        )
+
+        tgt_by_title = {m["title"]: m for m in tgt_milestones if m.get("title")}
+
+        created = 0
+        updated = 0
+        for src_ms in src_milestones:
+            title = src_ms.get("title")
+            if not title:
+                continue
+
+            payload = {
+                "title": title,
+                "state": src_ms.get("state", "open"),
+                "description": src_ms.get("description") or "",
+            }
+            due_on = src_ms.get("due_on")
+            if due_on:
+                payload["due_on"] = due_on
+
+            if title not in tgt_by_title:
+                url = _get_api_url(
+                    target_platform,
+                    f"/repos/{target_owner}/{repo_name}/milestones",
+                )
+                if target_platform == "github":
+                    resp = api_request(
+                        "POST", url, headers=github_headers(target_token),
+                        json=payload, max_retries=1,
+                    )
+                else:
+                    payload["access_token"] = target_token
+                    resp = api_request("POST", url, json=payload, max_retries=1)
+
+                if resp.status_code in (200, 201):
+                    created += 1
+                else:
+                    logging.warning(f"  Failed to create milestone {title}: {resp.status_code}")
+            else:
+                # Check if update needed
+                tgt_ms = tgt_by_title[title]
+                needs_update = (
+                    tgt_ms.get("state") != payload["state"]
+                    or (tgt_ms.get("description") or "") != payload["description"]
+                    or tgt_ms.get("due_on") != payload.get("due_on")
+                )
+                if needs_update:
+                    number = tgt_ms.get("number")
+                    url = _get_api_url(
+                        target_platform,
+                        f"/repos/{target_owner}/{repo_name}/milestones/{number}",
+                    )
+                    if target_platform == "github":
+                        resp = api_request(
+                            "PATCH", url, headers=github_headers(target_token),
+                            json=payload, max_retries=1,
+                        )
+                    else:
+                        payload["access_token"] = target_token
+                        resp = api_request("PATCH", url, json=payload, max_retries=1)
+
+                    if resp.status_code in (200, 201):
+                        updated += 1
+
+        if created or updated:
+            logging.info(f"  Milestones synced: {created} created, {updated} updated")
+
+    except Exception as e:
+        logging.warning(f"  Milestones sync failed: {e}")
+
+
+# ---- Issues sync ----
+
+SYNC_MARKER = "<!-- synced-from: {url} -->"
+
+
+def sync_issues(source_platform, target_platform, source_owner, target_owner,
+                source_token, target_token, repo_name):
+    """Sync open issues from source to target.
+
+    Uses a marker in the body to avoid duplicate creation.
+    Only syncs open issues. Also syncs comments.
+    """
+    try:
+        src_issues = _paginated_get(
+            source_platform, source_token,
+            f"/repos/{source_owner}/{repo_name}/issues",
+            extra_params={"state": "open"},
+        )
+        tgt_issues = _paginated_get(
+            target_platform, target_token,
+            f"/repos/{target_owner}/{repo_name}/issues",
+            extra_params={"state": "all"},
+        )
+
+        # Filter out pull requests (GitHub returns PRs in issues endpoint)
+        src_issues = [i for i in src_issues if not i.get("pull_request")]
+        tgt_issues = [i for i in tgt_issues if not i.get("pull_request")]
+
+        # Build set of already-synced issue markers from target
+        synced_markers = set()
+        for issue in tgt_issues:
+            body = issue.get("body") or ""
+            if "<!-- synced-from:" in body:
+                synced_markers.add(body.split("<!-- synced-from:")[1].split("-->")[0].strip())
+
+        created = 0
+        for src_issue in src_issues:
+            title = src_issue.get("title")
+            if not title:
+                continue
+
+            # Build source issue URL for marker
+            issue_number = src_issue.get("number")
+            if source_platform == "github":
+                src_url = f"https://github.com/{source_owner}/{repo_name}/issues/{issue_number}"
+            else:
+                src_url = f"https://gitee.com/{source_owner}/{repo_name}/issues/{issue_number}"
+
+            if src_url in synced_markers:
+                continue  # Already synced
+
+            # Create issue on target
+            body = src_issue.get("body") or ""
+            marker = SYNC_MARKER.format(url=src_url)
+            body = f"{body}\n\n---\n{marker}"
+
+            url = _get_api_url(
+                target_platform,
+                f"/repos/{target_owner}/{repo_name}/issues",
+            )
+            payload = {"title": title, "body": body}
+
+            if target_platform == "github":
+                resp = api_request(
+                    "POST", url, headers=github_headers(target_token),
+                    json=payload, max_retries=1,
+                )
+            else:
+                payload["access_token"] = target_token
+                resp = api_request("POST", url, json=payload, max_retries=1)
+
+            if resp.status_code in (200, 201):
+                created += 1
+                new_issue = resp.json()
+                # Sync comments
+                _sync_issue_comments(
+                    source_platform, target_platform,
+                    source_owner, target_owner,
+                    source_token, target_token,
+                    repo_name, issue_number, new_issue.get("number"),
+                )
+            else:
+                logging.warning(f"  Failed to create issue '{title}': {resp.status_code}")
+
+        if created:
+            logging.info(f"  Issues synced: {created} created")
+
+    except Exception as e:
+        logging.warning(f"  Issues sync failed: {e}")
+
+
+def _sync_issue_comments(source_platform, target_platform,
+                         source_owner, target_owner,
+                         source_token, target_token,
+                         repo_name, src_issue_number, tgt_issue_number):
+    """Sync comments from a source issue to a target issue."""
+    if not tgt_issue_number:
+        return
+    try:
+        comments = _paginated_get(
+            source_platform, source_token,
+            f"/repos/{source_owner}/{repo_name}/issues/{src_issue_number}/comments",
+        )
+        for comment in comments:
+            body = comment.get("body")
+            if not body:
+                continue
+            url = _get_api_url(
+                target_platform,
+                f"/repos/{target_owner}/{repo_name}/issues/{tgt_issue_number}/comments",
+            )
+            payload = {"body": body}
+            if target_platform == "github":
+                api_request(
+                    "POST", url, headers=github_headers(target_token),
+                    json=payload, max_retries=1,
+                )
+            else:
+                payload["access_token"] = target_token
+                api_request("POST", url, json=payload, max_retries=1)
+    except Exception as e:
+        logging.warning(f"  Issue comments sync failed: {e}")
+
+
+# ---- Dispatch extra sync calls per repo ----
+
+def sync_extras(source_platform, target_platform, source_owner, target_owner,
+                source_token, target_token, repo_name, sync_extra):
+    """Call the appropriate extra sync functions based on sync_extra set."""
+    if "releases" in sync_extra:
+        logging.info(f"  Syncing releases ...")
+        sync_releases(
+            source_platform, target_platform,
+            source_owner, target_owner,
+            source_token, target_token,
+            repo_name,
+        )
+
+    if "wiki" in sync_extra:
+        logging.info(f"  Syncing wiki ...")
+        sync_wiki(
+            source_platform, target_platform,
+            source_owner, target_owner,
+            source_token, target_token,
+            repo_name,
+        )
+
+    if "labels" in sync_extra:
+        logging.info(f"  Syncing labels ...")
+        sync_labels(
+            source_platform, target_platform,
+            source_owner, target_owner,
+            source_token, target_token,
+            repo_name,
+        )
+
+    if "milestones" in sync_extra:
+        logging.info(f"  Syncing milestones ...")
+        sync_milestones(
+            source_platform, target_platform,
+            source_owner, target_owner,
+            source_token, target_token,
+            repo_name,
+        )
+
+    if "issues" in sync_extra:
+        logging.info(f"  Syncing issues ...")
+        sync_issues(
+            source_platform, target_platform,
+            source_owner, target_owner,
+            source_token, target_token,
+            repo_name,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Main sync flow
 # ---------------------------------------------------------------------------
 
@@ -717,6 +1313,15 @@ def sync_one_direction(source_platform, target_platform, source_owner, target_ow
             source_token, target_token,
             repo_name,
         )
+
+        # 4d. Sync extra items (releases, wiki, labels, milestones, issues)
+        if sync_extra:
+            sync_extras(
+                source_platform, target_platform,
+                source_owner, target_owner,
+                source_token, target_token,
+                repo_name, sync_extra,
+            )
 
         synced += 1
 
