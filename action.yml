@@ -1,0 +1,57 @@
+name: 'GitHub Gitee Sync'
+description: 'Sync all repositories (public/private) between GitHub and Gitee'
+author: 'NEVSTOP-LAB'
+
+inputs:
+  github-owner:
+    description: 'GitHub username or organization name'
+    required: true
+  github-token:
+    description: 'GitHub Personal Access Token (needs repo scope)'
+    required: true
+  gitee-owner:
+    description: 'Gitee username or organization name'
+    required: true
+  gitee-token:
+    description: 'Gitee Personal Access Token (needs projects scope)'
+    required: true
+  account-type:
+    description: 'Account type: user or org'
+    required: false
+    default: 'user'
+  include-private:
+    description: 'Whether to include private repositories'
+    required: false
+    default: 'true'
+  exclude-repos:
+    description: 'Comma-separated list of repository names to exclude'
+    required: false
+    default: ''
+  direction:
+    description: 'Sync direction: github2gitee, gitee2github, or both'
+    required: false
+    default: 'github2gitee'
+  create-missing-repos:
+    description: 'Whether to create repos on target platform if they do not exist'
+    required: false
+    default: 'true'
+  sync-extra:
+    description: 'Comma-separated list of extra items to sync: releases,wiki,labels,milestones,issues'
+    required: false
+    default: ''
+
+outputs:
+  synced-count:
+    description: 'Number of repositories successfully synced'
+  failed-count:
+    description: 'Number of repositories that failed to sync'
+  skipped-count:
+    description: 'Number of repositories skipped'
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+
+branding:
+  icon: 'refresh-cw'
+  color: 'blue'
