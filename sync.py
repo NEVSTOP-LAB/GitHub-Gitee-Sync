@@ -381,6 +381,77 @@ def create_github_repo(owner, token, repo_name, private, description, account_ty
     return False
 
 
+# ---------------------------------------------------------------------------
+# Git Mirror sync module
+# ---------------------------------------------------------------------------
+
+GIT_TIMEOUT = 600  # seconds
+
+
+def mirror_sync(source_url, target_url, repo_name):
+    """Perform git clone --mirror + git push --mirror.
+
+    Args:
+        source_url: Source repository URL (with token embedded).
+        target_url: Target repository URL (with token embedded).
+        repo_name: Repository name (for logging).
+
+    Returns:
+        'success', 'empty', or 'failed'.
+    """
+    temp_dir = tempfile.mkdtemp(prefix=f"sync_{repo_name}_")
+    try:
+        # Step 1: git clone --mirror
+        logging.info(f"  Cloning from source ...")
+        result = subprocess.run(
+            ["git", "clone", "--mirror", source_url, temp_dir],
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT,
+        )
+
+        if result.returncode != 0:
+            stderr = result.stderr
+            if "empty repository" in stderr.lower():
+                logging.warning(f"  {repo_name} is an empty repository, skipping push")
+                return "empty"
+            logging.error(f"  git clone --mirror failed: {mask_token(stderr)}")
+            return "failed"
+
+        # Check for empty repo warning in stderr
+        if "empty repository" in (result.stderr or "").lower():
+            logging.warning(f"  {repo_name} is an empty repository, skipping push")
+            return "empty"
+
+        # Step 2: git push --mirror
+        logging.info(f"  Pushing to target ...")
+        result = subprocess.run(
+            ["git", "push", "--mirror", target_url],
+            cwd=temp_dir,
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT,
+        )
+
+        if result.returncode != 0:
+            logging.error(
+                f"  git push --mirror failed: {mask_token(result.stderr)}"
+            )
+            return "failed"
+
+        logging.info(f"  Mirror sync completed ✓")
+        return "success"
+
+    except subprocess.TimeoutExpired:
+        logging.error(f"  git operation timed out ({GIT_TIMEOUT}s)")
+        return "failed"
+    except Exception as e:
+        logging.error(f"  Mirror sync error: {mask_token(str(e))}")
+        return "failed"
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 def main():
     """Main entry point."""
     args = parse_args()
