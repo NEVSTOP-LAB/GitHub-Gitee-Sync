@@ -7,8 +7,15 @@ Supports one-way (GitHub→Gitee, Gitee→GitHub) and bidirectional sync.
 """
 
 import argparse
+import logging
 import os
+import re
+import requests
+import shutil
+import subprocess
 import sys
+import tempfile
+import time
 
 
 def parse_args():
@@ -108,6 +115,125 @@ def parse_args():
         parser.error(f"Missing required parameters: {', '.join(missing)}")
 
     return args
+
+
+# ---------------------------------------------------------------------------
+# Utility helpers
+# ---------------------------------------------------------------------------
+
+def mask_token(text):
+    """Mask tokens in text to prevent leaking credentials in logs."""
+    return re.sub(r'https://[^@]+@', 'https://***@', str(text))
+
+
+def api_request(method, url, max_retries=3, backoff_base=2, **kwargs):
+    """Make an HTTP request with retry logic and rate-limit handling.
+
+    Returns the Response object on success, raises on final failure.
+    """
+    kwargs.setdefault("timeout", 30)
+    last_error = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            resp = requests.request(method, url, **kwargs)
+
+            # Handle rate limiting
+            remaining = int(resp.headers.get("X-RateLimit-Remaining", 999))
+            if remaining < 100 and remaining > 0:
+                time.sleep(1)
+            if resp.status_code in (403, 429) and remaining == 0:
+                reset_time = int(resp.headers.get("X-RateLimit-Reset", 0))
+                wait = max(0, reset_time - time.time())
+                if wait > 900:
+                    raise Exception("API rate limit exceeded, reset time too long (>15min)")
+                logging.warning(f"API rate limit reached, waiting {wait:.0f}s ...")
+                time.sleep(wait + 1)
+                continue
+
+            return resp
+
+        except requests.RequestException as e:
+            last_error = e
+            if attempt < max_retries:
+                wait = backoff_base ** attempt
+                logging.warning(
+                    f"Request to {url} failed (attempt {attempt+1}), "
+                    f"retrying in {wait}s: {e}"
+                )
+                time.sleep(wait)
+
+    raise last_error
+
+
+# ---------------------------------------------------------------------------
+# GitHub API module
+# ---------------------------------------------------------------------------
+
+GITHUB_API = "https://api.github.com"
+
+
+def github_headers(token):
+    """Return standard GitHub API headers."""
+    return {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json",
+    }
+
+
+def get_github_repos(owner, token, account_type, include_private):
+    """Fetch all repositories from GitHub via REST API.
+
+    Args:
+        owner: GitHub username or org name.
+        token: GitHub personal access token.
+        account_type: 'user' or 'org'.
+        include_private: whether to include private repos.
+
+    Returns:
+        List of dicts with keys: name, private, description, clone_url.
+    """
+    if account_type == "org":
+        url = f"{GITHUB_API}/orgs/{owner}/repos"
+    else:
+        url = f"{GITHUB_API}/user/repos"
+
+    headers = github_headers(token)
+    page = 1
+    all_repos = []
+
+    while True:
+        params = {"per_page": 100, "page": page}
+        if account_type == "user":
+            params["type"] = "owner"
+
+        resp = api_request("GET", url, headers=headers, params=params)
+        if resp.status_code != 200:
+            raise Exception(
+                f"Failed to fetch GitHub repos: {resp.status_code} {resp.text}"
+            )
+
+        data = resp.json()
+        if not data:
+            break
+
+        for repo in data:
+            name = repo.get("name")
+            if not name:
+                continue
+            is_private = repo.get("private", False)
+            if not include_private and is_private:
+                continue
+            all_repos.append({
+                "name": name,
+                "private": is_private,
+                "description": repo.get("description") or "",
+                "clone_url": repo.get("clone_url", ""),
+            })
+
+        page += 1
+
+    return all_repos
 
 
 def main():
