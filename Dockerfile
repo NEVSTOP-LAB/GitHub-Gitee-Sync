@@ -12,8 +12,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy sync script
+# Copy scripts
 COPY sync.py .
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Default entrypoint
-ENTRYPOINT ["python", "sync.py"]
+# Use entrypoint.sh as entry point
+# - GitHub Action mode: receives INPUT_* env vars, maps them, calls sync.py
+# - Docker standalone mode: uses standard env vars directly
+ENTRYPOINT ["/entrypoint.sh"]
