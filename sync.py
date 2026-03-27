@@ -118,12 +118,91 @@ def parse_args():
 
 
 # ---------------------------------------------------------------------------
+# API constants
+# ---------------------------------------------------------------------------
+
+GITHUB_API = "https://api.github.com"
+GITEE_API = "https://gitee.com/api/v5"
+
+# ---------------------------------------------------------------------------
 # Utility helpers
 # ---------------------------------------------------------------------------
+
+def setup_logging():
+    """Configure logging format and level."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(levelname)s] %(message)s",
+        stream=sys.stdout,
+    )
+
 
 def mask_token(text):
     """Mask tokens in text to prevent leaking credentials in logs."""
     return re.sub(r'https://[^@]+@', 'https://***@', str(text))
+
+
+def validate_tokens(github_token, gitee_token):
+    """Validate GitHub and Gitee tokens before starting sync.
+
+    Raises Exception with clear message if any token is invalid.
+    """
+    # Validate GitHub Token
+    logging.info("Validating GitHub token ...")
+    try:
+        resp = requests.get(
+            f"{GITHUB_API}/user",
+            headers={"Authorization": f"token {github_token}"},
+            timeout=30,
+        )
+        if resp.status_code == 401:
+            raise Exception(
+                "GitHub Token authentication failed (HTTP 401).\n"
+                "  Please check your token: https://github.com/settings/tokens\n"
+                "  Required scope: repo (full repository access)"
+            )
+        if resp.status_code != 200:
+            raise Exception(
+                f"GitHub Token validation failed: HTTP {resp.status_code}"
+            )
+        github_user = resp.json().get("login", "unknown")
+        logging.info(f"  GitHub authenticated as: {github_user}")
+    except requests.RequestException as e:
+        raise Exception(f"GitHub Token validation network error: {e}")
+
+    # Validate Gitee Token
+    logging.info("Validating Gitee token ...")
+    try:
+        resp = requests.get(
+            f"{GITEE_API}/user",
+            params={"access_token": gitee_token},
+            timeout=30,
+        )
+        if resp.status_code == 401:
+            raise Exception(
+                "Gitee Token authentication failed (HTTP 401).\n"
+                "  Please check your token: https://gitee.com/profile/personal_access_tokens\n"
+                "  Required permission: projects"
+            )
+        if resp.status_code != 200:
+            raise Exception(
+                f"Gitee Token validation failed: HTTP {resp.status_code}"
+            )
+        gitee_user = resp.json().get("login", "unknown")
+        logging.info(f"  Gitee authenticated as: {gitee_user}")
+    except requests.RequestException as e:
+        raise Exception(f"Gitee Token validation network error: {e}")
+
+
+def check_git_installed():
+    """Check if git is available in PATH."""
+    try:
+        result = subprocess.run(
+            ["git", "--version"], capture_output=True, text=True, check=True
+        )
+        logging.info(f"Git version: {result.stdout.strip()}")
+    except FileNotFoundError:
+        raise Exception("Git is not installed or not in PATH")
 
 
 def api_request(method, url, max_retries=3, backoff_base=2, **kwargs):
@@ -169,8 +248,6 @@ def api_request(method, url, max_retries=3, backoff_base=2, **kwargs):
 # ---------------------------------------------------------------------------
 # GitHub API module
 # ---------------------------------------------------------------------------
-
-GITHUB_API = "https://api.github.com"
 
 
 def github_headers(token):
@@ -239,8 +316,6 @@ def get_github_repos(owner, token, account_type, include_private):
 # ---------------------------------------------------------------------------
 # Gitee API module
 # ---------------------------------------------------------------------------
-
-GITEE_API = "https://gitee.com/api/v5"
 
 
 def get_gitee_repos(owner, token, account_type):
@@ -649,9 +724,23 @@ def sync_all(args):
 
 def main():
     """Main entry point."""
+    setup_logging()
     args = parse_args()
 
-    exit_code = sync_all(args)
+    try:
+        # Pre-flight checks
+        check_git_installed()
+        validate_tokens(args.github_token, args.gitee_token)
+    except Exception as e:
+        logging.error(f"[FATAL] {e}")
+        sys.exit(3)
+
+    try:
+        exit_code = sync_all(args)
+    except Exception as e:
+        logging.error(f"[FATAL] Unexpected error: {e}")
+        exit_code = 3
+
     sys.exit(exit_code)
 
 
