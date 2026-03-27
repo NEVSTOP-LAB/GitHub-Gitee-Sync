@@ -294,9 +294,9 @@ jobs:
 
       - name: Show results
         run: |
-          echo "✅ Synced: ${{ steps.sync.outputs.synced-count }}"
-          echo "❌ Failed: ${{ steps.sync.outputs.failed-count }}"
-          echo "⏭️ Skipped: ${{ steps.sync.outputs.skipped-count }}"
+          echo "✅ Synced: ${{ steps.sync.outputs['synced-count'] }}"
+          echo "❌ Failed: ${{ steps.sync.outputs['failed-count'] }}"
+          echo "⏭️ Skipped: ${{ steps.sync.outputs['skipped-count'] }}"
 ```
 
 ---

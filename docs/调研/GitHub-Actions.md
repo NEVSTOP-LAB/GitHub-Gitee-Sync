@@ -158,7 +158,7 @@ with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
     gitee-owner: myuser
 
 - name: Check results
-  run: echo "Synced ${{ steps.sync.outputs.synced-count }} repos"
+  run: echo "Synced ${{ steps.sync.outputs['synced-count'] }} repos"
 ```
 
 ### 4.3 已废弃方式（不要使用）

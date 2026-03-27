@@ -153,7 +153,7 @@ docker run --rm \
     gitee-owner: myuser
     gitee-token: ${{ secrets.GITEE_TOKEN }}
     include-private: 'false'
-- run: echo "Synced ${{ steps.sync.outputs.synced-count }} repos"
+- run: echo "Synced ${{ steps.sync.outputs['synced-count'] }} repos"
 ```
 
 ### Python CLI
