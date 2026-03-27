@@ -184,3 +184,125 @@ while True:
 
 - [Gitee API v5 Swagger 文档](https://gitee.com/api/v5/swagger)
 - [Gitee 帮助文档](https://gitee.com/help)
+
+---
+
+## 9. Releases API
+
+### 9.1 列出 Releases
+
+```
+GET /repos/{owner}/{repo}/releases
+```
+
+- 需要 `access_token` 参数
+- 关键字段：`id`, `tag_name`, `name`, `body`, `prerelease`
+
+### 9.2 创建 Release
+
+```
+POST /repos/{owner}/{repo}/releases
+```
+
+- 请求体：
+  ```json
+  {
+    "access_token": "...",
+    "tag_name": "v1.0.0",
+    "name": "Release Title",
+    "body": "Release notes...",
+    "prerelease": false
+  }
+  ```
+
+### 9.3 上传 Release Asset（附件）
+
+```
+POST /repos/{owner}/{repo}/releases/{release_id}/attach_files
+```
+
+- 使用 `multipart/form-data` 上传
+- 参数名为 `file`
+- 需要 `access_token`
+
+---
+
+## 10. Labels API
+
+```
+GET    /repos/{owner}/{repo}/labels            # 列出全部标签
+POST   /repos/{owner}/{repo}/labels            # 创建标签
+PATCH  /repos/{owner}/{repo}/labels/{name}     # 更新标签
+DELETE /repos/{owner}/{repo}/labels/{name}      # 删除标签
+```
+
+- 关键字段：`name`, `color`
+- 创建/更新需要 `access_token`
+
+---
+
+## 11. Milestones API
+
+```
+GET    /repos/{owner}/{repo}/milestones            # 列出里程碑
+POST   /repos/{owner}/{repo}/milestones            # 创建里程碑
+PATCH  /repos/{owner}/{repo}/milestones/{number}   # 更新里程碑
+DELETE /repos/{owner}/{repo}/milestones/{number}    # 删除里程碑
+```
+
+- 关键字段：`title`, `state`, `description`, `due_on`
+
+---
+
+## 12. Issues API
+
+```
+GET    /repos/{owner}/{repo}/issues                         # 列出 issues
+POST   /repos/{owner}/{repo}/issues                         # 创建 issue
+PATCH  /repos/{owner}/{repo}/issues/{number}                # 更新 issue
+GET    /repos/{owner}/{repo}/issues/{number}/comments       # 列出评论
+POST   /repos/{owner}/{repo}/issues/{number}/comments       # 创建评论
+```
+
+- 关键字段：`title`, `body`, `state`, `labels`
+
+---
+
+## 13. Wiki API
+
+### 13.1 列出 Wiki 页面
+
+```
+GET /repos/{owner}/{repo}/wikis
+```
+
+### 13.2 获取 Wiki 页面内容
+
+```
+GET /repos/{owner}/{repo}/wikis/{sha}
+```
+
+### 13.3 创建 Wiki 页面
+
+```
+POST /repos/{owner}/{repo}/wikis
+```
+
+### 13.4 更新 Wiki 页面
+
+```
+PATCH /repos/{owner}/{repo}/wikis/{sha}
+```
+
+> **注意**：Gitee Wiki 也可通过 Git 仓库方式访问（`{repo}.wiki.git`），与 GitHub 保持一致。推荐使用 git mirror 方式同步 Wiki。
+
+---
+
+## 14. 更新仓库信息
+
+```
+PATCH /repos/{owner}/{repo}
+```
+
+- 可更新字段：`description`, `homepage`, `default_branch`, `private` 等
+- 需要 `access_token`

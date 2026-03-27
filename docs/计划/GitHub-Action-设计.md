@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-将本项目封装为一个 GitHub Action（Docker Container 类型），使用户可以在自己的 Workflow 中通过 `uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1` 直接调用，实现定时或手动触发 GitHub → Gitee 的全量仓库同步。
+将本项目封装为一个 GitHub Action（Docker Container 类型），使用户可以在自己的 Workflow 中通过 `uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1` 直接调用，实现定时或手动触发 GitHub ↔ Gitee 的仓库同步（支持单向和双向）。
 
 ---
 
@@ -10,7 +10,7 @@
 
 ```yaml
 name: 'GitHub Gitee Sync'
-description: 'Sync all repositories (public/private) from GitHub to Gitee'
+description: 'Sync all repositories (public/private) between GitHub and Gitee'
 author: 'NEVSTOP-LAB'
 
 inputs:
@@ -36,6 +36,18 @@ inputs:
     default: 'true'
   exclude-repos:
     description: 'Comma-separated list of repository names to exclude'
+    required: false
+    default: ''
+  direction:
+    description: 'Sync direction: github2gitee, gitee2github, or both'
+    required: false
+    default: 'github2gitee'
+  create-missing-repos:
+    description: 'Whether to create repos on target platform if they do not exist'
+    required: false
+    default: 'true'
+  sync-extra:
+    description: 'Comma-separated list of extra items to sync: releases,wiki,labels,milestones,issues'
     required: false
     default: ''
 
@@ -101,6 +113,9 @@ export GITEE_TOKEN="${INPUT_GITEE_TOKEN:-$GITEE_TOKEN}"
 export ACCOUNT_TYPE="${INPUT_ACCOUNT_TYPE:-${ACCOUNT_TYPE:-user}}"
 export INCLUDE_PRIVATE="${INPUT_INCLUDE_PRIVATE:-${INCLUDE_PRIVATE:-true}}"
 export EXCLUDE_REPOS="${INPUT_EXCLUDE_REPOS:-$EXCLUDE_REPOS}"
+export SYNC_DIRECTION="${INPUT_DIRECTION:-${SYNC_DIRECTION:-github2gitee}}"
+export CREATE_MISSING_REPOS="${INPUT_CREATE_MISSING_REPOS:-${CREATE_MISSING_REPOS:-true}}"
+export SYNC_EXTRA="${INPUT_SYNC_EXTRA:-$SYNC_EXTRA}"
 
 # 执行同步脚本
 python /app/sync.py
@@ -212,7 +227,59 @@ jobs:
           exclude-repos: 'old-repo,deprecated-repo'
 ```
 
-### 7.3 仅公开仓库 + 使用输出
+### 7.3 反向同步（Gitee → GitHub）
+
+```yaml
+      - name: Sync Gitee to GitHub
+        uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1
+        with:
+          github-owner: myuser
+          github-token: ${{ secrets.GH_TOKEN }}
+          gitee-owner: myuser
+          gitee-token: ${{ secrets.GITEE_TOKEN }}
+          direction: gitee2github
+```
+
+### 7.4 双向同步
+
+```yaml
+      - name: Bidirectional sync
+        uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1
+        with:
+          github-owner: myuser
+          github-token: ${{ secrets.GH_TOKEN }}
+          gitee-owner: myuser
+          gitee-token: ${{ secrets.GITEE_TOKEN }}
+          direction: both
+```
+
+### 7.5 不自动创建仓库（仅同步已存在的同名仓库）
+
+```yaml
+      - name: Sync existing repos only
+        uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1
+        with:
+          github-owner: myuser
+          github-token: ${{ secrets.GH_TOKEN }}
+          gitee-owner: myuser
+          gitee-token: ${{ secrets.GITEE_TOKEN }}
+          create-missing-repos: 'false'
+```
+
+### 7.6 同步附属信息（Releases + Wiki）
+
+```yaml
+      - name: Sync with releases and wiki
+        uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1
+        with:
+          github-owner: myuser
+          github-token: ${{ secrets.GH_TOKEN }}
+          gitee-owner: myuser
+          gitee-token: ${{ secrets.GITEE_TOKEN }}
+          sync-extra: 'releases,wiki'
+```
+
+### 7.7 仅公开仓库 + 使用输出
 
 ```yaml
       - name: Sync public repos

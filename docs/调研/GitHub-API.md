@@ -156,5 +156,121 @@ while True:
 
 - [GitHub REST API 官方文档](https://docs.github.com/en/rest)
 - [Repositories API](https://docs.github.com/en/rest/repos/repos)
+- [Releases API](https://docs.github.com/en/rest/releases/releases)
+- [Release Assets API](https://docs.github.com/en/rest/releases/assets)
+- [Issues API](https://docs.github.com/en/rest/issues/issues)
+- [Labels API](https://docs.github.com/en/rest/issues/labels)
+- [Milestones API](https://docs.github.com/en/rest/issues/milestones)
 - [Authentication](https://docs.github.com/en/rest/authentication)
 - [Rate Limiting](https://docs.github.com/en/rest/rate-limit)
+
+---
+
+## 8. Releases API
+
+### 8.1 列出 Releases
+
+```
+GET /repos/{owner}/{repo}/releases
+```
+
+- 返回仓库的全部 releases（不包含未关联 release 的纯 tag）
+- 关键字段：`id`, `tag_name`, `name`, `body`, `draft`, `prerelease`, `assets`
+
+### 8.2 创建 Release
+
+```
+POST /repos/{owner}/{repo}/releases
+```
+
+- 请求体：
+  ```json
+  {
+    "tag_name": "v1.0.0",
+    "name": "Release Title",
+    "body": "Release notes...",
+    "draft": false,
+    "prerelease": false
+  }
+  ```
+- 响应中包含 `upload_url` 用于上传附件
+
+### 8.3 上传 Release Asset
+
+```
+POST https://uploads.github.com/repos/{owner}/{repo}/releases/{release_id}/assets?name=filename
+```
+
+- 注意：上传 URL 域名为 `uploads.github.com`（不是 `api.github.com`）
+- 使用 `Content-Type` 头指定文件 MIME 类型
+- 请求体为文件二进制内容
+
+### 8.4 列出 Release Assets
+
+```
+GET /repos/{owner}/{repo}/releases/{release_id}/assets
+```
+
+---
+
+## 9. Labels API
+
+```
+GET    /repos/{owner}/{repo}/labels            # 列出全部标签
+POST   /repos/{owner}/{repo}/labels            # 创建标签
+PATCH  /repos/{owner}/{repo}/labels/{name}     # 更新标签
+DELETE /repos/{owner}/{repo}/labels/{name}      # 删除标签
+```
+
+- 关键字段：`name`, `color`, `description`
+
+---
+
+## 10. Milestones API
+
+```
+GET    /repos/{owner}/{repo}/milestones            # 列出里程碑
+POST   /repos/{owner}/{repo}/milestones            # 创建里程碑
+PATCH  /repos/{owner}/{repo}/milestones/{number}   # 更新里程碑
+DELETE /repos/{owner}/{repo}/milestones/{number}    # 删除里程碑
+```
+
+- 关键字段：`title`, `state`, `description`, `due_on`
+
+---
+
+## 11. Issues API
+
+```
+GET    /repos/{owner}/{repo}/issues                         # 列出 issues
+POST   /repos/{owner}/{repo}/issues                         # 创建 issue
+PATCH  /repos/{owner}/{repo}/issues/{issue_number}          # 更新 issue
+GET    /repos/{owner}/{repo}/issues/{issue_number}/comments # 列出评论
+POST   /repos/{owner}/{repo}/issues/{issue_number}/comments # 创建评论
+```
+
+- 关键字段：`title`, `body`, `state`, `labels`, `milestone`, `assignees`
+- 注意：Issues API 也会返回 Pull Requests（需通过 `pull_request` 字段区分）
+
+---
+
+## 12. 更新仓库信息
+
+```
+PATCH /repos/{owner}/{repo}
+```
+
+- 可更新字段：`description`, `homepage`, `default_branch`, `private`, `topics` 等
+- 请求体示例：
+  ```json
+  {
+    "description": "New description",
+    "homepage": "https://example.com"
+  }
+  ```
+
+---
+
+## 13. Wiki
+
+GitHub **没有** Wiki REST API。Wiki 是独立的 Git 仓库，通过 `{repo}.wiki.git` URL 访问，可使用 `git clone --mirror` / `git push --mirror` 同步。

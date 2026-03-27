@@ -2,7 +2,7 @@
 
 ## 1. 脚本概述
 
-创建 `sync.py` 脚本，用于将 GitHub 账号（个人或组织）下的全部仓库同步到 Gitee 对应账号下。
+创建 `sync.py` 脚本，用于在 GitHub 和 Gitee 之间同步账号（个人或组织）下的全部仓库，支持单向和双向同步。
 
 ---
 
@@ -17,6 +17,19 @@
 | 账号类型 | `ACCOUNT_TYPE` | `--account-type` | ❌ | `user` | `user` 或 `org`（个人/组织） |
 | 包含私有仓库 | `INCLUDE_PRIVATE` | `--include-private` | ❌ | `true` | 是否同步私有仓库 |
 | 排除仓库列表 | `EXCLUDE_REPOS` | `--exclude-repos` | ❌ | 空 | 逗号分隔的仓库名列表 |
+| 同步方向 | `SYNC_DIRECTION` | `--direction` | ❌ | `github→gitee` | 同步方向（见下表） |
+| 创建不存在的仓库 | `CREATE_MISSING_REPOS` | `--create-missing-repos` | ❌ | `true` | 目标仓库不存在时是否自动创建 |
+| 附属信息同步 | `SYNC_EXTRA` | `--sync-extra` | ❌ | 空 | 逗号分隔：`releases,wiki,labels,milestones,issues` |
+
+### 同步方向参数
+
+| 参数值 | 含义 | 说明 |
+|-------|------|------|
+| `github→gitee` | GitHub → Gitee | 从 GitHub 同步到 Gitee（默认） |
+| `gitee→github` | Gitee → GitHub | 从 Gitee 同步到 GitHub |
+| `github↔gitee` | GitHub ↔ Gitee | 双向同步（以 GitHub 为主） |
+
+> **说明**：CLI 中可以使用 `github2gitee`、`gitee2github`、`both` 作为简写形式。
 
 ### 参数优先级
 
@@ -39,17 +52,41 @@ sync.py                  # 主入口脚本（单文件即可）
 def parse_args() -> argparse.Namespace:
     """解析命令行参数和环境变量"""
 
+def validate_tokens(github_token, gitee_token) -> None:
+    """验证 GitHub 和 Gitee Token 的有效性（在同步前调用）"""
+
 def get_github_repos(owner, token, account_type, include_private) -> list[dict]:
     """通过 GitHub API 获取全部仓库列表"""
 
 def get_gitee_repos(owner, token, account_type) -> list[dict]:
     """通过 Gitee API 获取全部仓库列表"""
 
-def create_gitee_repo(owner, token, repo_name, private, description, account_type) -> bool:
-    """在 Gitee 上创建仓库（如果不存在）"""
+def create_repo(platform, owner, token, repo_name, private, description, account_type) -> bool:
+    """在目标平台上创建仓库（如果 create_missing_repos=true 且仓库不存在）"""
 
 def mirror_sync(source_url, target_url, repo_name) -> bool:
     """执行 git clone --mirror + git push --mirror"""
+
+def sync_wiki(source_owner, source_repo, target_owner, target_repo, ...) -> bool:
+    """同步 Wiki（git clone --mirror .wiki.git + git push --mirror）"""
+
+def sync_releases(source_platform, target_platform, owner, repo, ...) -> bool:
+    """同步 Releases 和 Release Assets"""
+
+def sync_labels(source_platform, target_platform, owner, repo, ...) -> bool:
+    """同步 Labels"""
+
+def sync_milestones(source_platform, target_platform, owner, repo, ...) -> bool:
+    """同步 Milestones"""
+
+def sync_issues(source_platform, target_platform, owner, repo, ...) -> bool:
+    """同步 Issues 和 Comments（可选，复杂度高）"""
+
+def sync_repo_metadata(source_platform, target_platform, owner, repo, ...) -> bool:
+    """同步仓库元信息（描述、主页等）"""
+
+def sync_single_repo(repo, args) -> str:
+    """同步单个仓库（代码 + 根据配置同步附属信息），返回 'success'/'failed'/'skipped'"""
 
 def sync_all(args) -> None:
     """主同步流程"""
@@ -64,28 +101,46 @@ def sync_all(args) -> None:
   │
   ├─ 1. 解析参数（CLI + 环境变量）
   │
-  ├─ 2. 获取 GitHub 全部仓库列表
+  ├─ 2. 验证 Token 有效性
+  │
+  ├─ 3. 确定同步方向（源平台/目标平台）
+  │
+  ├─ 4. 获取源平台全部仓库列表
   │     ├─ 分页获取
   │     └─ 根据 include_private 过滤
   │
-  ├─ 3. 根据 exclude_repos 过滤不需要同步的仓库
+  ├─ 5. 根据 exclude_repos 过滤不需要同步的仓库
   │
-  ├─ 4. 获取 Gitee 已有仓库列表（用于判断是否需要创建）
+  ├─ 6. 获取目标平台已有仓库列表（用于判断是否需要创建）
   │
-  ├─ 5. 遍历每个需要同步的仓库：
-  │     ├─ 5a. 检查 Gitee 是否已有同名仓库
-  │     │     └─ 如果没有 → 调用 Gitee API 创建仓库
+  ├─ 7. 遍历每个需要同步的仓库：
+  │     ├─ 7a. 检查目标平台是否已有同名仓库
+  │     │     └─ 如果没有 且 create_missing_repos=true → 创建仓库
+  │     │     └─ 如果没有 且 create_missing_repos=false → 跳过该仓库
   │     │
-  │     ├─ 5b. git clone --mirror（从 GitHub 克隆）
+  │     ├─ 7b. git clone --mirror（从源平台克隆）
   │     │
-  │     ├─ 5c. git push --mirror（推送到 Gitee）
+  │     ├─ 7c. git push --mirror（推送到目标平台）
   │     │
-  │     └─ 5d. 清理临时目录
+  │     ├─ 7d. 同步仓库元信息（描述、主页等）
+  │     │
+  │     ├─ 7e. 根据 sync_extra 配置同步附属信息：
+  │     │     ├─ releases: 同步 Releases + Assets
+  │     │     ├─ wiki: 同步 Wiki（.wiki.git mirror）
+  │     │     ├─ labels: 同步 Labels
+  │     │     ├─ milestones: 同步 Milestones
+  │     │     └─ issues: 同步 Issues + Comments
+  │     │
+  │     └─ 7f. 清理临时目录
   │
-  ├─ 6. 输出同步结果摘要
+  ├─ 8. 如果是双向同步 → 反向执行一轮
+  │
+  ├─ 9. 输出同步结果摘要
   │
   └─ 结束
 ```
+
+> 详细的流程图请参见 [流程图](流程图.md)
 
 ---
 
@@ -93,12 +148,20 @@ def sync_all(args) -> None:
 
 | 场景 | 处理方式 |
 |------|---------|
-| API 请求失败 | 重试 3 次，间隔 2 秒 |
+| API 请求失败 | 重试 3 次，间隔递增 (2s, 4s, 8s) |
 | 仓库创建失败 | 记录错误，跳过该仓库，继续处理其他仓库 |
-| git clone 失败 | 记录错误，跳过该仓库 |
-| git push 失败 | 记录错误，跳过该仓库 |
+| git clone 失败 | 重试 2 次，最终失败则跳过该仓库 |
+| git push 失败 | 重试 2 次，最终失败则跳过该仓库 |
 | Token 无效 | 立即退出，明确报错 |
+| Token 权限不足 | 降级处理或退出 |
 | 网络超时 | 重试 3 次，间隔递增 |
+| Rate Limit | 检查剩余配额，必要时等待重置 |
+| 空仓库 | 跳过 git push，记录警告 |
+| Wiki 不存在 | 静默跳过 |
+| 附属信息同步失败 | 记录警告，不影响仓库整体同步状态 |
+| 双向冲突 | 以主方为准（默认 GitHub） |
+
+> 详细的错误处理设计请参见 [错误处理设计](错误处理设计.md)
 
 ---
 
@@ -141,12 +204,28 @@ def sync_all(args) -> None:
 ### 命令行方式
 
 ```bash
-# 基本用法
+# 基本用法（GitHub → Gitee，默认）
 python sync.py \
   --github-owner myuser \
   --github-token ghp_xxxx \
   --gitee-owner myuser \
   --gitee-token xxxxx
+
+# 反向同步：Gitee → GitHub
+python sync.py \
+  --github-owner myuser \
+  --github-token ghp_xxxx \
+  --gitee-owner myuser \
+  --gitee-token xxxxx \
+  --direction gitee2github
+
+# 双向同步
+python sync.py \
+  --github-owner myuser \
+  --github-token ghp_xxxx \
+  --gitee-owner myuser \
+  --gitee-token xxxxx \
+  --direction both
 
 # 组织账号 + 排除特定仓库
 python sync.py \
@@ -160,6 +239,24 @@ python sync.py \
   --github-owner myuser \
   --gitee-owner myuser \
   --include-private false
+
+# 不自动创建目标仓库（仅同步已存在的同名仓库）
+python sync.py \
+  --github-owner myuser \
+  --gitee-owner myuser \
+  --create-missing-repos false
+
+# 同步代码 + Releases + Wiki
+python sync.py \
+  --github-owner myuser \
+  --gitee-owner myuser \
+  --sync-extra "releases,wiki"
+
+# 同步全部附属信息
+python sync.py \
+  --github-owner myuser \
+  --gitee-owner myuser \
+  --sync-extra "releases,wiki,labels,milestones,issues"
 ```
 
 ### 环境变量方式
@@ -170,6 +267,9 @@ export GITHUB_TOKEN=ghp_xxxx
 export GITEE_OWNER=myuser
 export GITEE_TOKEN=xxxxx
 export EXCLUDE_REPOS="old-repo,deprecated-repo"
+export SYNC_DIRECTION=github2gitee
+export CREATE_MISSING_REPOS=true
+export SYNC_EXTRA=releases,wiki
 
 python sync.py
 ```
