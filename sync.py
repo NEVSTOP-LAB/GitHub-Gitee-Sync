@@ -339,6 +339,48 @@ def create_gitee_repo(owner, token, repo_name, private, description, account_typ
     return False
 
 
+def create_github_repo(owner, token, repo_name, private, description, account_type):
+    """Create a repository on GitHub (used for reverse / bidirectional sync).
+
+    Args:
+        owner: GitHub username or org name.
+        token: GitHub personal access token.
+        repo_name: Name of the repository to create.
+        private: Whether the repo should be private.
+        description: Repository description.
+        account_type: 'user' or 'org'.
+
+    Returns:
+        True if creation was successful or repo already exists, False otherwise.
+    """
+    if account_type == "org":
+        url = f"{GITHUB_API}/orgs/{owner}/repos"
+    else:
+        url = f"{GITHUB_API}/user/repos"
+
+    headers = github_headers(token)
+    payload = {
+        "name": repo_name,
+        "description": description[:350] if description else "",
+        "private": private,
+        "auto_init": False,
+    }
+
+    resp = api_request("POST", url, headers=headers, json=payload, max_retries=1)
+
+    if resp.status_code in (200, 201):
+        logging.info(f"  Created GitHub repo: {repo_name}")
+        return True
+    if resp.status_code == 422:
+        logging.info(f"  GitHub repo {repo_name} already exists, skip creation")
+        return True
+
+    logging.error(
+        f"  Failed to create GitHub repo {repo_name}: {resp.status_code} {resp.text}"
+    )
+    return False
+
+
 def main():
     """Main entry point."""
     args = parse_args()
