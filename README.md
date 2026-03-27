@@ -13,6 +13,7 @@ Sync All the Repos(public/private) between GitHub and Gitee.
 - 🔒 支持私有仓库同步
 - 🚫 支持排除指定仓库
 - 🐳 提供 Docker 镜像，开箱即用
+- 🎬 提供 GitHub Action，一键集成到 Workflow
 - 📋 自动在 Gitee 创建不存在的仓库
 
 ## 快速开始
@@ -23,6 +24,32 @@ Sync All the Repos(public/private) between GitHub and Gitee.
 - Git
 - [GitHub Personal Access Token](https://github.com/settings/tokens)（需要 `repo` 权限）
 - [Gitee Personal Access Token](https://gitee.com/profile/personal_access_tokens)（需要 `projects` 权限）
+
+### 使用 GitHub Action
+
+在你的仓库中创建 `.github/workflows/sync.yml`：
+
+```yaml
+name: Sync to Gitee
+on:
+  schedule:
+    - cron: '0 2 * * *'   # 每天 UTC 2:00 自动同步
+  workflow_dispatch:        # 支持手动触发
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync GitHub to Gitee
+        uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1
+        with:
+          github-owner: ${{ github.repository_owner }}
+          github-token: ${{ secrets.GH_TOKEN }}
+          gitee-owner: ${{ secrets.GITEE_OWNER }}
+          gitee-token: ${{ secrets.GITEE_TOKEN }}
+```
+
+> **注意**：需要在仓库 Settings > Secrets 中配置 `GH_TOKEN`、`GITEE_OWNER`、`GITEE_TOKEN`。
 
 ### 使用 Python
 
@@ -63,6 +90,41 @@ docker run --rm \
 
 ## 使用示例
 
+### GitHub Action
+
+```yaml
+# 同步个人账号全部仓库
+- uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1
+  with:
+    github-owner: myuser
+    github-token: ${{ secrets.GH_TOKEN }}
+    gitee-owner: myuser
+    gitee-token: ${{ secrets.GITEE_TOKEN }}
+
+# 同步组织仓库，排除部分仓库
+- uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1
+  with:
+    github-owner: my-org
+    github-token: ${{ secrets.GH_TOKEN }}
+    gitee-owner: my-org
+    gitee-token: ${{ secrets.GITEE_TOKEN }}
+    account-type: org
+    exclude-repos: 'old-repo,deprecated-repo'
+
+# 仅同步公开仓库 + 获取结果
+- uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1
+  id: sync
+  with:
+    github-owner: myuser
+    github-token: ${{ secrets.GH_TOKEN }}
+    gitee-owner: myuser
+    gitee-token: ${{ secrets.GITEE_TOKEN }}
+    include-private: 'false'
+- run: echo "Synced ${{ steps.sync.outputs.synced-count }} repos"
+```
+
+### Python CLI
+
 ```bash
 # 同步个人账号全部仓库
 python sync.py \
@@ -98,10 +160,12 @@ python sync.py \
   - [GitHub API 调研](docs/调研/GitHub-API.md)
   - [Gitee API 调研](docs/调研/Gitee-API.md)
   - [Git Mirror 同步机制](docs/调研/Git-Mirror-同步机制.md)
+  - [GitHub Actions 自定义 Action](docs/调研/GitHub-Actions.md)
 
 - **开发计划**
   - [Python 脚本设计](docs/计划/Python-脚本设计.md)
   - [Docker 镜像设计](docs/计划/Docker-镜像设计.md)
+  - [GitHub Action 设计](docs/计划/GitHub-Action-设计.md)
   - [开发步骤](docs/计划/开发步骤.md)
 
 ## License
