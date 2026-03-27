@@ -1,0 +1,30 @@
+#!/bin/sh
+set -e
+
+# Bridge script: maps GitHub Action's INPUT_* environment variables
+# to the standard environment variables expected by sync.py.
+#
+# GitHub Actions automatically converts input names:
+#   - to UPPERCASE
+#   - hyphens (-) to underscores (_)
+#   - adds INPUT_ prefix
+# Example: input "github-owner" → INPUT_GITHUB_OWNER
+
+# GitHub credentials
+export GITHUB_OWNER="${INPUT_GITHUB_OWNER:-$GITHUB_OWNER}"
+export GITHUB_TOKEN="${INPUT_GITHUB_TOKEN:-$GITHUB_TOKEN}"
+
+# Gitee credentials
+export GITEE_OWNER="${INPUT_GITEE_OWNER:-$GITEE_OWNER}"
+export GITEE_TOKEN="${INPUT_GITEE_TOKEN:-$GITEE_TOKEN}"
+
+# Optional parameters (with defaults)
+export ACCOUNT_TYPE="${INPUT_ACCOUNT_TYPE:-${ACCOUNT_TYPE:-user}}"
+export INCLUDE_PRIVATE="${INPUT_INCLUDE_PRIVATE:-${INCLUDE_PRIVATE:-true}}"
+export EXCLUDE_REPOS="${INPUT_EXCLUDE_REPOS:-$EXCLUDE_REPOS}"
+export SYNC_DIRECTION="${INPUT_DIRECTION:-${SYNC_DIRECTION:-github2gitee}}"
+export CREATE_MISSING_REPOS="${INPUT_CREATE_MISSING_REPOS:-${CREATE_MISSING_REPOS:-true}}"
+export SYNC_EXTRA="${INPUT_SYNC_EXTRA:-$SYNC_EXTRA}"
+
+# Execute sync script
+python /app/sync.py
