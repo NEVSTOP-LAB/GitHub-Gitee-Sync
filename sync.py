@@ -452,9 +452,207 @@ def mirror_sync(source_url, target_url, repo_name):
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+# ---------------------------------------------------------------------------
+# Main sync flow
+# ---------------------------------------------------------------------------
+
+def build_source_url(platform, owner, token, repo_name):
+    """Build a git clone URL with token embedded for authentication."""
+    if platform == "github":
+        return f"https://{token}@github.com/{owner}/{repo_name}.git"
+    else:
+        return f"https://{token}@gitee.com/{owner}/{repo_name}.git"
+
+
+def sync_one_direction(source_platform, target_platform, source_owner, target_owner,
+                       source_token, target_token, account_type, include_private,
+                       exclude_repos, create_missing_repos, sync_extra):
+    """Sync repos from source platform to target platform.
+
+    Returns:
+        Tuple of (synced_count, failed_count, skipped_count, failed_repos).
+    """
+    synced = 0
+    failed = 0
+    skipped = 0
+    failed_repos = []
+
+    # 1. Get source repos
+    logging.info(f"Fetching {source_platform} repos for {source_owner} ...")
+    if source_platform == "github":
+        source_repos = get_github_repos(source_owner, source_token, account_type, include_private)
+    else:
+        source_repos = get_gitee_repos(source_owner, source_token, account_type)
+
+    logging.info(f"Found {len(source_repos)} repos on {source_platform}")
+
+    # 2. Filter excluded repos
+    if exclude_repos:
+        before = len(source_repos)
+        source_repos = [r for r in source_repos if r["name"] not in exclude_repos]
+        excluded_count = before - len(source_repos)
+        if excluded_count > 0:
+            logging.info(f"Excluded {excluded_count} repos: {', '.join(sorted(exclude_repos))}")
+
+    logging.info(f"Repos to sync: {len(source_repos)}")
+
+    if not source_repos:
+        logging.info("No repos to sync.")
+        return synced, failed, skipped, failed_repos
+
+    # 3. Get target repos (for existence check)
+    logging.info(f"Fetching {target_platform} repos for {target_owner} ...")
+    if target_platform == "github":
+        target_repos_list = get_github_repos(target_owner, target_token, account_type, True)
+    else:
+        target_repos_list = get_gitee_repos(target_owner, target_token, account_type)
+
+    target_repo_names = {r["name"] for r in target_repos_list}
+    logging.info(f"Found {len(target_repo_names)} existing repos on {target_platform}")
+
+    # 4. Sync each repo
+    total = len(source_repos)
+    for idx, repo in enumerate(source_repos, 1):
+        repo_name = repo["name"]
+        logging.info(f"[{idx}/{total}] Syncing {repo_name} ...")
+
+        # 4a. Check/create target repo
+        if repo_name not in target_repo_names:
+            if not create_missing_repos:
+                logging.info(f"  Target repo not found and create_missing_repos=false, skipping")
+                skipped += 1
+                continue
+
+            # Create repo on target platform
+            if target_platform == "github":
+                ok = create_github_repo(
+                    target_owner, target_token, repo_name,
+                    repo.get("private", False), repo.get("description", ""),
+                    account_type,
+                )
+            else:
+                ok = create_gitee_repo(
+                    target_owner, target_token, repo_name,
+                    repo.get("private", False), repo.get("description", ""),
+                    account_type,
+                )
+
+            if not ok:
+                logging.error(f"  Failed to create target repo, skipping {repo_name}")
+                failed += 1
+                failed_repos.append((repo_name, "Failed to create target repo"))
+                continue
+
+        # 4b. Mirror sync
+        source_url = build_source_url(source_platform, source_owner, source_token, repo_name)
+        target_url = build_source_url(target_platform, target_owner, target_token, repo_name)
+        result = mirror_sync(source_url, target_url, repo_name)
+
+        if result == "failed":
+            failed += 1
+            failed_repos.append((repo_name, "git mirror sync failed"))
+            continue
+        elif result == "empty":
+            skipped += 1
+            continue
+
+        synced += 1
+
+    return synced, failed, skipped, failed_repos
+
+
+def write_action_outputs(synced, failed, skipped):
+    """Write sync results to GitHub Action outputs if running in Actions."""
+    output_file = os.environ.get("GITHUB_OUTPUT")
+    if output_file:
+        with open(output_file, "a") as f:
+            f.write(f"synced-count={synced}\n")
+            f.write(f"failed-count={failed}\n")
+            f.write(f"skipped-count={skipped}\n")
+
+
+def sync_all(args):
+    """Main sync orchestration.
+
+    Determines direction, performs sync, outputs summary.
+
+    Returns:
+        Exit code: 0=all success, 1=partial failure, 2=all failed, 3=fatal error.
+    """
+    direction = args.direction
+    total_synced = 0
+    total_failed = 0
+    total_skipped = 0
+    all_failed_repos = []
+
+    if direction in ("github2gitee", "both"):
+        logging.info("=" * 50)
+        logging.info(f"Syncing GitHub({args.github_owner}) → Gitee({args.gitee_owner})")
+        logging.info("=" * 50)
+        s, f, sk, fr = sync_one_direction(
+            "github", "gitee",
+            args.github_owner, args.gitee_owner,
+            args.github_token, args.gitee_token,
+            args.account_type, args.include_private,
+            args.exclude_repos, args.create_missing_repos,
+            args.sync_extra,
+        )
+        total_synced += s
+        total_failed += f
+        total_skipped += sk
+        all_failed_repos.extend(fr)
+
+    if direction in ("gitee2github", "both"):
+        logging.info("=" * 50)
+        logging.info(f"Syncing Gitee({args.gitee_owner}) → GitHub({args.github_owner})")
+        logging.info("=" * 50)
+        s, f, sk, fr = sync_one_direction(
+            "gitee", "github",
+            args.gitee_owner, args.github_owner,
+            args.gitee_token, args.github_token,
+            args.account_type, args.include_private,
+            args.exclude_repos, args.create_missing_repos,
+            args.sync_extra,
+        )
+        total_synced += s
+        total_failed += f
+        total_skipped += sk
+        all_failed_repos.extend(fr)
+
+    # Summary
+    logging.info("=" * 50)
+    logging.info("===== Sync Summary =====")
+    logging.info(f"  ✅ Synced:  {total_synced}")
+    logging.info(f"  ❌ Failed:  {total_failed}")
+    logging.info(f"  ⏭️  Skipped: {total_skipped}")
+
+    if all_failed_repos:
+        logging.info("")
+        logging.info("Failed repos:")
+        for name, reason in all_failed_repos:
+            logging.info(f"  - {name}: {reason}")
+
+    logging.info("=" * 50)
+
+    # Write GitHub Action outputs
+    write_action_outputs(total_synced, total_failed, total_skipped)
+
+    # Determine exit code
+    total = total_synced + total_failed + total_skipped
+    if total_failed == 0:
+        return 0  # All success
+    elif total_synced > 0:
+        return 1  # Partial failure
+    else:
+        return 2  # All failed
+
+
 def main():
     """Main entry point."""
     args = parse_args()
+
+    exit_code = sync_all(args)
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
