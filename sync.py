@@ -236,6 +236,109 @@ def get_github_repos(owner, token, account_type, include_private):
     return all_repos
 
 
+# ---------------------------------------------------------------------------
+# Gitee API module
+# ---------------------------------------------------------------------------
+
+GITEE_API = "https://gitee.com/api/v5"
+
+
+def get_gitee_repos(owner, token, account_type):
+    """Fetch all repositories from Gitee via REST API.
+
+    Args:
+        owner: Gitee username or org name.
+        token: Gitee personal access token.
+        account_type: 'user' or 'org'.
+
+    Returns:
+        List of dicts with keys: name, private, description.
+    """
+    if account_type == "org":
+        url = f"{GITEE_API}/orgs/{owner}/repos"
+    else:
+        url = f"{GITEE_API}/user/repos"
+
+    page = 1
+    all_repos = []
+
+    while True:
+        params = {
+            "access_token": token,
+            "per_page": 100,
+            "page": page,
+        }
+        if account_type == "user":
+            params["type"] = "owner"
+
+        resp = api_request("GET", url, params=params)
+        if resp.status_code != 200:
+            raise Exception(
+                f"Failed to fetch Gitee repos: {resp.status_code} {resp.text}"
+            )
+
+        data = resp.json()
+        if not data:
+            break
+
+        for repo in data:
+            name = repo.get("name")
+            if not name:
+                continue
+            all_repos.append({
+                "name": name,
+                "private": repo.get("private", False),
+                "description": repo.get("description") or "",
+            })
+
+        page += 1
+
+    return all_repos
+
+
+def create_gitee_repo(owner, token, repo_name, private, description, account_type):
+    """Create a repository on Gitee.
+
+    Args:
+        owner: Gitee username or org name.
+        token: Gitee personal access token.
+        repo_name: Name of the repository to create.
+        private: Whether the repo should be private.
+        description: Repository description.
+        account_type: 'user' or 'org'.
+
+    Returns:
+        True if creation was successful or repo already exists, False otherwise.
+    """
+    if account_type == "org":
+        url = f"{GITEE_API}/orgs/{owner}/repos"
+    else:
+        url = f"{GITEE_API}/user/repos"
+
+    payload = {
+        "access_token": token,
+        "name": repo_name,
+        "description": description[:200] if description else "",
+        "private": private,
+        "auto_init": False,
+    }
+
+    resp = api_request("POST", url, json=payload, max_retries=1)
+
+    if resp.status_code in (200, 201):
+        logging.info(f"  Created Gitee repo: {repo_name}")
+        return True
+    if resp.status_code == 422:
+        # Repo may already exist
+        logging.info(f"  Gitee repo {repo_name} already exists, skip creation")
+        return True
+
+    logging.error(
+        f"  Failed to create Gitee repo {repo_name}: {resp.status_code} {resp.text}"
+    )
+    return False
+
+
 def main():
     """Main entry point."""
     args = parse_args()
