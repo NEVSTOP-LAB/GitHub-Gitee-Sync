@@ -528,6 +528,85 @@ def mirror_sync(source_url, target_url, repo_name):
 
 
 # ---------------------------------------------------------------------------
+# Repository metadata sync module
+# ---------------------------------------------------------------------------
+
+def get_repo_details(platform, owner, token, repo_name):
+    """Get repository details from platform API.
+
+    Returns dict with description, homepage, etc., or None on failure.
+    """
+    if platform == "github":
+        url = f"{GITHUB_API}/repos/{owner}/{repo_name}"
+        resp = api_request("GET", url, headers=github_headers(token), max_retries=2)
+    else:
+        url = f"{GITEE_API}/repos/{owner}/{repo_name}"
+        resp = api_request("GET", url, params={"access_token": token}, max_retries=2)
+
+    if resp.status_code != 200:
+        return None
+
+    data = resp.json()
+    return {
+        "description": data.get("description") or "",
+        "homepage": data.get("homepage") or "",
+    }
+
+
+def update_repo_metadata(platform, owner, token, repo_name, metadata):
+    """Update repository metadata on target platform via PATCH API."""
+    if platform == "github":
+        url = f"{GITHUB_API}/repos/{owner}/{repo_name}"
+        resp = api_request(
+            "PATCH", url, headers=github_headers(token),
+            json=metadata, max_retries=1,
+        )
+    else:
+        url = f"{GITEE_API}/repos/{owner}/{repo_name}"
+        payload = {"access_token": token}
+        payload.update(metadata)
+        resp = api_request("PATCH", url, json=payload, max_retries=1)
+
+    if resp.status_code in (200, 201):
+        return True
+    logging.warning(f"  Failed to update metadata: {resp.status_code}")
+    return False
+
+
+def sync_repo_metadata(source_platform, target_platform, source_owner, target_owner,
+                       source_token, target_token, repo_name):
+    """Sync repository metadata (description, homepage) from source to target.
+
+    Only updates if there are differences. Non-fatal on failure.
+    """
+    try:
+        source_info = get_repo_details(source_platform, source_owner, source_token, repo_name)
+        if not source_info:
+            logging.warning(f"  Could not fetch source repo details for metadata sync")
+            return
+
+        target_info = get_repo_details(target_platform, target_owner, target_token, repo_name)
+        if not target_info:
+            logging.warning(f"  Could not fetch target repo details for metadata sync")
+            return
+
+        # Compare and update only changed fields
+        updates = {}
+        for key in ("description", "homepage"):
+            if source_info.get(key, "") != target_info.get(key, ""):
+                updates[key] = source_info[key]
+
+        if updates:
+            logging.info(f"  Syncing metadata: {', '.join(updates.keys())}")
+            update_repo_metadata(target_platform, target_owner, target_token, repo_name, updates)
+        else:
+            logging.debug(f"  Metadata already in sync")
+
+    except Exception as e:
+        logging.warning(f"  Metadata sync failed: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Main sync flow
 # ---------------------------------------------------------------------------
 
@@ -630,6 +709,14 @@ def sync_one_direction(source_platform, target_platform, source_owner, target_ow
         elif result == "empty":
             skipped += 1
             continue
+
+        # 4c. Sync repository metadata (description, homepage)
+        sync_repo_metadata(
+            source_platform, target_platform,
+            source_owner, target_owner,
+            source_token, target_token,
+            repo_name,
+        )
 
         synced += 1
 
