@@ -206,6 +206,57 @@ python sync.py \
 - 通过 Git mirror 方式同步 Wiki
 - 自动处理分页、仓库创建、错误重试
 
+## Action Outputs
+
+| Output | 说明 |
+|--------|------|
+| `synced-count` | 成功同步的仓库数量 |
+| `failed-count` | 同步失败的仓库数量 |
+| `skipped-count` | 跳过的仓库数量 |
+
+## 退出码
+
+| 退出码 | 含义 |
+|-------|------|
+| 0 | 全部成功 |
+| 1 | 部分仓库失败 |
+| 2 | 全部失败 |
+| 3 | 致命错误（认证失败、环境异常） |
+
+## 环境变量方式
+
+```bash
+export GITHUB_OWNER=myuser
+export GITHUB_TOKEN=ghp_xxxx
+export GITEE_OWNER=myuser
+export GITEE_TOKEN=xxxxx
+export SYNC_DIRECTION=github2gitee
+export CREATE_MISSING_REPOS=true
+export SYNC_EXTRA=releases,wiki
+
+python sync.py
+```
+
+## Docker 环境变量方式
+
+```bash
+docker run --rm \
+  -e GITHUB_OWNER=myuser \
+  -e GITHUB_TOKEN=ghp_xxxx \
+  -e GITEE_OWNER=myuser \
+  -e GITEE_TOKEN=xxxxx \
+  -e SYNC_DIRECTION=github2gitee \
+  -e CREATE_MISSING_REPOS=true \
+  -e SYNC_EXTRA=releases,wiki \
+  github-gitee-sync
+```
+
+也可以使用 `.env` 文件：
+
+```bash
+docker run --rm --env-file .env github-gitee-sync
+```
+
 ## 文档
 
 详细的调研和开发计划请参见 `docs/` 目录：
