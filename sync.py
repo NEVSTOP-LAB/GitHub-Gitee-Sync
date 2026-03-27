@@ -219,7 +219,7 @@ def api_request(method, url, max_retries=3, backoff_base=2, **kwargs):
 
             # Handle rate limiting
             remaining = int(resp.headers.get("X-RateLimit-Remaining", 999))
-            if remaining < 100 and remaining > 0:
+            if 0 < remaining < 100:
                 time.sleep(1)
             if resp.status_code in (403, 429) and remaining == 0:
                 reset_time = int(resp.headers.get("X-RateLimit-Reset", 0))
@@ -393,7 +393,7 @@ def create_gitee_repo(owner, token, repo_name, private, description, account_typ
     payload = {
         "access_token": token,
         "name": repo_name,
-        "description": description[:200] if description else "",
+        "description": description[:200] if description else "",  # Gitee API limits description to 200 chars
         "private": private,
         "auto_init": False,
     }
@@ -436,7 +436,7 @@ def create_github_repo(owner, token, repo_name, private, description, account_ty
     headers = github_headers(token)
     payload = {
         "name": repo_name,
-        "description": description[:350] if description else "",
+        "description": description[:350] if description else "",  # GitHub API limits description to 350 chars
         "private": private,
         "auto_init": False,
     }
@@ -460,7 +460,7 @@ def create_github_repo(owner, token, repo_name, private, description, account_ty
 # Git Mirror sync module
 # ---------------------------------------------------------------------------
 
-GIT_TIMEOUT = 600  # seconds
+GIT_TIMEOUT = 600  # 10 minutes — large repos may need extended time for clone/push
 
 
 def mirror_sync(source_url, target_url, repo_name):
@@ -1029,6 +1029,7 @@ def sync_milestones(source_platform, target_platform, source_owner, target_owner
 
 # ---- Issues sync ----
 
+# HTML comment marker embedded in issue body to prevent duplicate creation on re-runs
 SYNC_MARKER = "<!-- synced-from: {url} -->"
 
 
