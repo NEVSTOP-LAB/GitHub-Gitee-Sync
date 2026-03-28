@@ -24,6 +24,7 @@ import requests
 from lib.utils import (
     GITHUB_API,
     GITEE_API,
+    LogCollector,
     TokenMaskingFilter,
     mask_token,
     build_clone_url,
@@ -32,6 +33,7 @@ from lib.utils import (
     paginated_get,
     github_headers,
     gitee_headers,
+    get_log_collector,
     write_action_outputs,
     check_git_installed,
 )
@@ -453,13 +455,75 @@ class TestPaginatedGet:
 
 
 # ===========================================================================
+# LogCollector
+# ===========================================================================
+
+class TestLogCollector:
+    def test_collects_warning_messages(self):
+        collector = LogCollector()
+        collector.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+
+        record = logging.LogRecord(
+            name="test", level=logging.WARNING, pathname="test.py",
+            lineno=1, msg="Something went wrong", args=(), exc_info=None,
+        )
+        collector.emit(record)
+        assert "Something went wrong" in collector.get_log()
+
+    def test_ignores_info_messages(self):
+        collector = LogCollector()
+        collector.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+
+        record = logging.LogRecord(
+            name="test", level=logging.INFO, pathname="test.py",
+            lineno=1, msg="Normal info", args=(), exc_info=None,
+        )
+        # LogCollector level is WARNING, so INFO should be filtered by level
+        if collector.filter(record) and record.levelno >= collector.level:
+            collector.emit(record)
+        assert collector.get_log() == ""
+
+    def test_collects_error_messages(self):
+        collector = LogCollector()
+        collector.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+
+        record = logging.LogRecord(
+            name="test", level=logging.ERROR, pathname="test.py",
+            lineno=1, msg="Critical failure", args=(), exc_info=None,
+        )
+        collector.emit(record)
+        log = collector.get_log()
+        assert "[ERROR] Critical failure" in log
+
+    def test_multiple_messages_joined(self):
+        collector = LogCollector()
+        collector.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+
+        for msg in ("warn1", "warn2"):
+            record = logging.LogRecord(
+                name="test", level=logging.WARNING, pathname="test.py",
+                lineno=1, msg=msg, args=(), exc_info=None,
+            )
+            collector.emit(record)
+        log = collector.get_log()
+        assert "warn1" in log
+        assert "warn2" in log
+        assert "\n" in log
+
+    def test_empty_collector_returns_empty_string(self):
+        collector = LogCollector()
+        assert collector.get_log() == ""
+
+
+# ===========================================================================
 # write_action_outputs
 # ===========================================================================
 
 class TestWriteActionOutputs:
     def test_writes_to_github_output_file(self, tmp_path):
         output_file = tmp_path / "output.txt"
-        with patch.dict(os.environ, {"GITHUB_OUTPUT": str(output_file)}):
+        with patch.dict(os.environ, {"GITHUB_OUTPUT": str(output_file)}), \
+             patch("lib.utils.get_log_collector", return_value=None):
             write_action_outputs(5, 2, 1)
 
         content = output_file.read_text()
@@ -469,9 +533,67 @@ class TestWriteActionOutputs:
 
     def test_no_write_without_env_var(self, tmp_path):
         env = {k: v for k, v in os.environ.items() if k != "GITHUB_OUTPUT"}
-        with patch.dict(os.environ, env, clear=True):
+        env.pop("GITHUB_STEP_SUMMARY", None)
+        with patch.dict(os.environ, env, clear=True), \
+             patch("lib.utils.get_log_collector", return_value=None):
             write_action_outputs(1, 0, 0)
         # Should not raise or crash
+
+    def test_writes_sync_log_to_output(self, tmp_path):
+        """sync-log 应包含收集到的 WARNING+ 日志"""
+        output_file = tmp_path / "output.txt"
+        collector = LogCollector()
+        collector.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+        record = logging.LogRecord(
+            name="test", level=logging.WARNING, pathname="test.py",
+            lineno=1, msg="test warning message", args=(), exc_info=None,
+        )
+        collector.emit(record)
+
+        with patch.dict(os.environ, {"GITHUB_OUTPUT": str(output_file)}), \
+             patch("lib.utils.get_log_collector", return_value=collector):
+            write_action_outputs(1, 0, 0)
+
+        content = output_file.read_text()
+        assert "sync-log<<SYNC_LOG_EOF" in content
+        assert "test warning message" in content
+        assert "SYNC_LOG_EOF" in content
+
+    def test_writes_step_summary(self, tmp_path):
+        """应将摘要写入 $GITHUB_STEP_SUMMARY"""
+        output_file = tmp_path / "output.txt"
+        summary_file = tmp_path / "summary.md"
+
+        with patch.dict(os.environ, {
+            "GITHUB_OUTPUT": str(output_file),
+            "GITHUB_STEP_SUMMARY": str(summary_file),
+        }), patch("lib.utils.get_log_collector", return_value=None):
+            write_action_outputs(3, 1, 2)
+
+        summary = summary_file.read_text()
+        assert "Sync Summary" in summary
+        assert "3" in summary
+        assert "1" in summary
+
+    def test_step_summary_includes_warnings(self, tmp_path):
+        """Step Summary 应包含 WARNING 日志"""
+        summary_file = tmp_path / "summary.md"
+        collector = LogCollector()
+        collector.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+        record = logging.LogRecord(
+            name="test", level=logging.WARNING, pathname="test.py",
+            lineno=1, msg="a warning", args=(), exc_info=None,
+        )
+        collector.emit(record)
+
+        with patch.dict(os.environ, {
+            "GITHUB_STEP_SUMMARY": str(summary_file),
+        }), patch("lib.utils.get_log_collector", return_value=collector):
+            write_action_outputs(1, 0, 0)
+
+        summary = summary_file.read_text()
+        assert "Warnings & Errors" in summary
+        assert "a warning" in summary
 
 
 # ===========================================================================

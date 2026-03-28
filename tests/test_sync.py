@@ -91,6 +91,31 @@ class TestParseArgs:
         args = self._parse(["--exclude-repos="])
         assert args.exclude_repos == set()
 
+    def test_include_repos_parsed_as_set(self):
+        args = self._parse(["--include-repos=repo1,repo2,repo3"])
+        assert args.include_repos == {"repo1", "repo2", "repo3"}
+
+    def test_empty_include_repos_is_empty_set(self):
+        args = self._parse(["--include-repos="])
+        assert args.include_repos == set()
+
+    def test_include_repos_default_is_empty_set(self):
+        args = self._parse([])
+        assert args.include_repos == set()
+
+    def test_include_and_exclude_warns(self):
+        """同时设置 include-repos 和 exclude-repos 时应记录警告"""
+        with patch("sync.logging.warning") as mock_warn:
+            args = self._parse([
+                "--include-repos=repo1",
+                "--exclude-repos=repo2",
+            ])
+        assert args.include_repos == {"repo1"}
+        assert args.exclude_repos == {"repo2"}
+        # Should have warning about both being set
+        warn_messages = [str(c) for c in mock_warn.call_args_list]
+        assert any("include-repos" in msg.lower() for msg in warn_messages)
+
     def test_missing_required_param_exits(self):
         with patch("sys.argv", ["sync.py", "--github-owner", "o"]):
             with pytest.raises(SystemExit):
@@ -134,6 +159,7 @@ class TestSyncOneDirection:
             target_token="giteetoken",
             account_type="user",
             include_private=True,
+            include_repos=set(),
             exclude_repos=set(),
             create_missing_repos=True,
             sync_extra=set(),
@@ -251,6 +277,58 @@ class TestSyncOneDirection:
             sync_one_direction(**self._common_kwargs(sync_extra={"labels"}))
         mock_extras.assert_called_once()
 
+    def test_include_repos_filters_to_allow_list(self):
+        """include_repos 设置后，只同步允许列表中的仓库"""
+        src_repos = [
+            {"name": "allowed"},
+            {"name": "not-allowed"},
+            {"name": "also-allowed"},
+        ]
+        tgt_repos = [{"name": "allowed"}, {"name": "also-allowed"}]
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.mirror_sync", return_value="success"), \
+             patch("sync.sync_repo_metadata"):
+            synced, failed, skipped, failed_repos = sync_one_direction(
+                **self._common_kwargs(
+                    include_repos={"allowed", "also-allowed"}
+                )
+            )
+        assert synced == 2
+
+    def test_include_repos_takes_precedence_over_exclude(self):
+        """include_repos 优先于 exclude_repos"""
+        src_repos = [{"name": "repo1"}, {"name": "repo2"}]
+        tgt_repos = [{"name": "repo1"}, {"name": "repo2"}]
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.mirror_sync", return_value="success"), \
+             patch("sync.sync_repo_metadata"):
+            synced, failed, skipped, failed_repos = sync_one_direction(
+                **self._common_kwargs(
+                    include_repos={"repo1"},
+                    exclude_repos={"repo1"},
+                )
+            )
+        # include_repos wins: repo1 is synced despite being in exclude
+        assert synced == 1
+
+    def test_include_repos_empty_syncs_all(self):
+        """include_repos 为空时同步全部仓库（不过滤）"""
+        src_repos = [{"name": "repo1"}, {"name": "repo2"}]
+        tgt_repos = [{"name": "repo1"}, {"name": "repo2"}]
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.mirror_sync", return_value="success"), \
+             patch("sync.sync_repo_metadata"):
+            synced, failed, skipped, failed_repos = sync_one_direction(
+                **self._common_kwargs(include_repos=set())
+            )
+        assert synced == 2
+
 
 # ===========================================================================
 # sync_all — exit codes
@@ -266,6 +344,7 @@ class TestSyncAll:
             gitee_token="giteetoken",
             account_type="user",
             include_private=True,
+            include_repos=set(),
             exclude_repos=set(),
             create_missing_repos=True,
             sync_extra=set(),

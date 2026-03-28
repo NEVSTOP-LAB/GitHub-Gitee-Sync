@@ -23,6 +23,10 @@ inputs:
     description: 'Whether to include private repositories'
     required: false
     default: 'true'
+  include-repos:
+    description: 'Comma-separated list of repository names to include (allow list). When set, ONLY these repos are synced. Takes precedence over exclude-repos.'
+    required: false
+    default: ''
   exclude-repos:
     description: 'Comma-separated list of repository names to exclude'
     required: false
@@ -51,6 +55,8 @@ outputs:
     description: 'Number of repositories that failed to sync'
   skipped-count:
     description: 'Number of repositories skipped'
+  sync-log:
+    description: 'Collected warnings and errors from the sync process'
 
 runs:
   using: 'docker'
