@@ -94,6 +94,14 @@ class TestTokenMaskingFilter:
         record = self._make_record("Token is gho_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij")
         f.filter(record)
         assert "gho_" not in record.msg
+        assert "***" in record.msg
+
+    def test_masks_ghs_token(self):
+        f = TokenMaskingFilter()
+        record = self._make_record("Token is ghs_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij")
+        f.filter(record)
+        assert "ghs_" not in record.msg
+        assert "***" in record.msg
 
     def test_masks_https_token_url(self):
         f = TokenMaskingFilter()
@@ -106,6 +114,13 @@ class TestTokenMaskingFilter:
         record = self._make_record("URL: https://api.gitee.com?access_token=secret123")
         f.filter(record)
         assert "secret123" not in record.msg
+
+    def test_masks_bearer_header(self):
+        f = TokenMaskingFilter()
+        record = self._make_record("Header Authorization: Bearer verysecrettoken123456")
+        f.filter(record)
+        assert "verysecrettoken123456" not in record.msg
+        assert "***" in record.msg
 
     def test_passes_safe_messages(self):
         f = TokenMaskingFilter()

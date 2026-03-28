@@ -83,9 +83,8 @@ class TestParseArgs:
         with patch("sync.logging.warning") as mock_warn:
             args = self._parse(["--sync-extra=releases,release,invalid"])
         assert args.sync_extra == {"releases"}
-        mock_warn.assert_called_once()
-        warning_msg = str(mock_warn.call_args)
-        assert "release" in warning_msg or "invalid" in warning_msg
+        warning_msgs = [" ".join(map(str, c.args)) for c in mock_warn.call_args_list]
+        assert any("sync-extra" in msg.lower() for msg in warning_msgs)
 
     def test_empty_exclude_repos_is_empty_set(self):
         args = self._parse(["--exclude-repos="])
@@ -113,8 +112,15 @@ class TestParseArgs:
         assert args.include_repos == {"repo1"}
         assert args.exclude_repos == {"repo2"}
         # Should have warning about both being set
-        warn_messages = [str(c) for c in mock_warn.call_args_list]
+        warn_messages = [" ".join(map(str, c.args)) for c in mock_warn.call_args_list]
         assert any("include-repos" in msg.lower() for msg in warn_messages)
+
+    def test_cli_tokens_emit_warning(self):
+        with patch("sync.logging.warning") as mock_warn:
+            self._parse([])
+        warn_messages = [" ".join(map(str, c.args)) for c in mock_warn.call_args_list]
+        assert any("process" in msg.lower() and "token" in msg.lower()
+                   for msg in warn_messages)
 
     def test_missing_required_param_exits(self):
         with patch("sys.argv", ["sync.py", "--github-owner", "o"]):

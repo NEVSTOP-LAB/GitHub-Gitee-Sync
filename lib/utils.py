@@ -47,9 +47,11 @@ class TokenMaskingFilter(logging.Filter):
     TOKEN_PATTERNS = [
         re.compile(r'ghp_[a-zA-Z0-9]{36}'),
         re.compile(r'gho_[a-zA-Z0-9]{36}'),
+        re.compile(r'ghs_[a-zA-Z0-9]{36}'),
         re.compile(r'github_pat_[a-zA-Z0-9_]{82}'),
         re.compile(r'https://[^@\s]+@'),
         re.compile(r'access_token=[^&\s]+'),
+        re.compile(r'Bearer\s+[A-Za-z0-9._-]{10,}'),
     ]
 
     def filter(self, record):

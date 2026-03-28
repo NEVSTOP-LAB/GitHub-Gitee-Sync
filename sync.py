@@ -218,6 +218,14 @@ def parse_args():
     if missing:
         parser.error(f"Missing required parameters: {', '.join(missing)}")
 
+    # 命令行传递 Token 会出现在进程列表中，优先使用环境变量以降低泄漏风险
+    cli_token_flags = {"--github-token", "--gitee-token"}
+    if any(flag in sys.argv[1:] for flag in cli_token_flags):
+        logging.warning(
+            "Tokens provided via CLI can appear in process lists; "
+            "prefer environment variables GITHUB_TOKEN / GITEE_TOKEN."
+        )
+
     return args
 
 

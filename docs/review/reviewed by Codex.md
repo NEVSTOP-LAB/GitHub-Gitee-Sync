@@ -26,3 +26,7 @@
 
 7) **[Low] 预热/健康检查缺少环境依赖提示**  
    `check_git_installed` 有覆盖，但缺少对网络连通性（github.com/gitee.com DNS/端口）和磁盘空间的早期检查。可以在开始阶段增加轻量自检，提前失败而不是在首个仓库 git/push 时才暴露问题。
+
+## 增量审查（数据安全，2026-03）
+- **日志脱敏覆盖不足**：`TokenMaskingFilter` 未包含 GitHub Actions 内置 token (`ghs_`) 与通用 `Bearer <token>` 头部，极端情况下（异常堆栈或第三方库日志带 headers）可能泄露凭据。已补充脱敏模式。（lib/utils.py）
+- **CLI 传参泄露风险提醒**：直接通过命令行传递 Token 会出现在进程列表，易被旁观进程/日志采集到。现解析到 CLI Token 时发出警告，引导使用环境变量 `GITHUB_TOKEN` / `GITEE_TOKEN`。（sync.py）
