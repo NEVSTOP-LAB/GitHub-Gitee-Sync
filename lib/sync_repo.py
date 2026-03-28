@@ -655,9 +655,11 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
                 env=src_env,
             )
             if result.returncode != 0:
-                # Wiki 不存在 — 静默跳过
-                logging.debug(
-                    f"  Wiki not available for {repo_name}, skipping"
+                # Wiki clone 失败 — 可能源仓库未启用 Wiki
+                # 二级评审 Issue #8: 从 debug 改为 warning，让用户知道 Wiki 未被同步
+                logging.warning(
+                    f"  Wiki not available for {repo_name}, skipping "
+                    f"(ensure Wiki is enabled on source repo)"
                 )
                 return
 
