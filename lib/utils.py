@@ -17,6 +17,7 @@ import base64
 import logging
 import os
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -43,13 +44,21 @@ class TokenMaskingFilter(logging.Filter):
     也能防止 Token 泄漏到日志输出中。
 
     对应: 二级评审 Issue #5 — "日志中 Token 可能遗漏脱敏"
+    覆盖模式:
+    - GitHub PAT (ghp_, gho_, github_pat_ 前缀)
+    - GitHub Actions 内置 Token (ghs_ 前缀)
+    - URL 中内联的凭据 (https://<token>@...)
+    - 查询参数中的 access_token
+    - HTTP Authorization 头部中的 Bearer Token
     """
     TOKEN_PATTERNS = [
         re.compile(r'ghp_[a-zA-Z0-9]{36}'),
         re.compile(r'gho_[a-zA-Z0-9]{36}'),
+        re.compile(r'ghs_[a-zA-Z0-9]{36}'),
         re.compile(r'github_pat_[a-zA-Z0-9_]{82}'),
         re.compile(r'https://[^@\s]+@'),
         re.compile(r'access_token=[^&\s]+'),
+        re.compile(r'Bearer\s+[a-zA-Z0-9_\-\.]+', re.IGNORECASE),
     ]
 
     def filter(self, record):
@@ -125,6 +134,26 @@ def mask_token(text):
     对应需求: docs/计划/错误处理设计.md — "Token 信息脱敏"
     """
     return re.sub(r'https://[^@]+@', 'https://***@', str(text))
+
+
+def sanitize_response_text(text, max_len=200):
+    """截断并脱敏 API 响应文本，用于安全的错误日志记录。
+
+    API 错误响应可能包含 Token、认证信息或其他敏感数据。
+    此函数截断长响应并应用 Token 脱敏，防止敏感信息通过
+    错误日志泄漏。
+
+    Args:
+        text: 原始响应文本。
+        max_len: 最大保留长度（默认 200 字符）。
+
+    Returns:
+        截断并脱敏后的文本。
+    """
+    if not text:
+        return ""
+    preview = text[:max_len].replace("\n", " ")
+    return mask_token(preview)
 
 
 def build_clone_url(platform, owner, repo_name):
@@ -312,6 +341,7 @@ def paginated_get(platform, token, path, extra_params=None):
     """通用分页 GET 请求，兼容 GitHub 和 Gitee 平台。
 
     遍历所有分页直到返回空列表。每页最多 100 条记录。
+    设有安全上限（500 页），防止异常 API 响应导致无限循环。
     对应: docs/调研/GitHub-API.md — "分页处理（per_page=100, page 递增）"
     对应: docs/调研/Gitee-API.md — "分页处理（per_page=100, page 递增）"
 
@@ -324,9 +354,12 @@ def paginated_get(platform, token, path, extra_params=None):
     Returns:
         所有分页结果合并后的列表。
     """
+    # 安全上限: 500 页 × 100 条/页 = 50000 条，足以覆盖绝大多数场景
+    # 防止 API 异常响应导致无限循环
+    MAX_PAGES = 500
     items = []
     page = 1
-    while True:
+    while page <= MAX_PAGES:
         p = {"per_page": 100, "page": page}
         if extra_params:
             p.update(extra_params)
@@ -342,7 +375,7 @@ def paginated_get(platform, token, path, extra_params=None):
 
         # 非 200 响应时记录警告并停止分页（而非静默忽略）
         if resp.status_code != 200:
-            body_preview = (resp.text or "")[:200].replace("\n", " ")
+            body_preview = sanitize_response_text(resp.text)
             logging.warning(
                 "Paginated GET failed for %s %s: status=%s, body=%r",
                 platform, url, resp.status_code, body_preview,
@@ -359,6 +392,12 @@ def paginated_get(platform, token, path, extra_params=None):
             logging.warning("Paginated GET returned non-list: %r", data)
             break
         page += 1
+    else:
+        logging.warning(
+            "Pagination safety limit reached (%d pages) for %s, "
+            "results may be incomplete",
+            MAX_PAGES, path,
+        )
     return items
 
 
@@ -393,6 +432,10 @@ def write_action_outputs(synced, failed, skipped):
     检测 $GITHUB_OUTPUT 环境变量是否存在，如存在则追加写入。
     同时将 WARNING+ 日志写入 sync-log output 和 $GITHUB_STEP_SUMMARY。
     对应需求: docs/计划/开发步骤.md — Step 13 "适配 sync.py 输出"
+
+    安全措施:
+    - heredoc 使用随机化分隔符，防止日志内容注入任意 outputs
+    - Step Summary 中的日志内容对反引号进行转义，防止 markdown 注入
     """
     # 收集日志信息
     collector = get_log_collector()
@@ -404,8 +447,11 @@ def write_action_outputs(synced, failed, skipped):
             f.write(f"synced-count={synced}\n")
             f.write(f"failed-count={failed}\n")
             f.write(f"skipped-count={skipped}\n")
-            # 多行输出使用 heredoc 语法
-            f.write(f"sync-log<<SYNC_LOG_EOF\n{log_text}\nSYNC_LOG_EOF\n")
+            # 使用随机化分隔符防止日志内容注入（heredoc injection）
+            # 如果 log_text 中包含固定分隔符字符串，攻击者可以提前终止 heredoc
+            # 并注入任意 output 键值对
+            delimiter = f"SYNC_LOG_EOF_{secrets.token_hex(16)}"
+            f.write(f"sync-log<<{delimiter}\n{log_text}\n{delimiter}\n")
 
     # 写入 GitHub Step Summary 以便在 Actions UI 中直接查看
     summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -418,4 +464,6 @@ def write_action_outputs(synced, failed, skipped):
             f.write(f"| ⏭️ Skipped | {skipped} |\n\n")
             if log_text:
                 f.write("### Warnings & Errors\n\n")
-                f.write(f"```\n{log_text}\n```\n")
+                # 转义反引号防止 markdown 代码块逃逸注入
+                safe_log = log_text.replace("`", "\\`")
+                f.write(f"```\n{safe_log}\n```\n")

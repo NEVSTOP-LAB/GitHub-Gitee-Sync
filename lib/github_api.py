@@ -44,7 +44,7 @@ import logging
 
 import requests
 
-from .utils import GITHUB_API, api_request, github_headers
+from .utils import GITHUB_API, api_request, github_headers, sanitize_response_text
 
 
 # ===========================================================================
@@ -144,7 +144,8 @@ def get_github_repos(owner, token, account_type, include_private):
         resp = api_request("GET", url, headers=headers, params=params)
         if resp.status_code != 200:
             raise Exception(
-                f"Failed to fetch GitHub repos: {resp.status_code} {resp.text}"
+                f"Failed to fetch GitHub repos: "
+                f"{resp.status_code} {sanitize_response_text(resp.text)}"
             )
 
         data = resp.json()
@@ -239,7 +240,7 @@ def create_github_repo(owner, token, repo_name, private, description, account_ty
 
     logging.error(
         f"  Failed to create GitHub repo {repo_name}: "
-        f"{resp.status_code} {resp.text}"
+        f"{resp.status_code} {sanitize_response_text(resp.text)}"
     )
     return False
 

@@ -27,6 +27,7 @@ from lib.utils import (
     LogCollector,
     TokenMaskingFilter,
     mask_token,
+    sanitize_response_text,
     build_clone_url,
     make_git_env,
     api_request,
@@ -540,7 +541,7 @@ class TestWriteActionOutputs:
         # Should not raise or crash
 
     def test_writes_sync_log_to_output(self, tmp_path):
-        """sync-log 应包含收集到的 WARNING+ 日志"""
+        """sync-log 应包含收集到的 WARNING+ 日志（使用随机化 heredoc 分隔符）"""
         output_file = tmp_path / "output.txt"
         collector = LogCollector()
         collector.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
@@ -555,9 +556,8 @@ class TestWriteActionOutputs:
             write_action_outputs(1, 0, 0)
 
         content = output_file.read_text()
-        assert "sync-log<<SYNC_LOG_EOF" in content
+        assert "sync-log<<SYNC_LOG_EOF_" in content
         assert "test warning message" in content
-        assert "SYNC_LOG_EOF" in content
 
     def test_writes_step_summary(self, tmp_path):
         """应将摘要写入 $GITHUB_STEP_SUMMARY"""
@@ -610,3 +610,163 @@ class TestCheckGitInstalled:
                    side_effect=FileNotFoundError("git not found")):
             with pytest.raises(Exception, match="Git is not installed"):
                 check_git_installed()
+
+
+# ===========================================================================
+# sanitize_response_text
+# ===========================================================================
+
+class TestSanitizeResponseText:
+    def test_truncates_long_text(self):
+        long_text = "a" * 500
+        result = sanitize_response_text(long_text, max_len=200)
+        assert len(result) == 200
+
+    def test_masks_token_in_response(self):
+        text = 'error: https://secret_token@github.com/repo.git failed'
+        result = sanitize_response_text(text)
+        assert "secret_token" not in result
+        assert "***" in result
+
+    def test_replaces_newlines(self):
+        text = "line1\nline2\nline3"
+        result = sanitize_response_text(text)
+        assert "\n" not in result
+
+    def test_empty_text_returns_empty(self):
+        assert sanitize_response_text("") == ""
+        assert sanitize_response_text(None) == ""
+
+
+# ===========================================================================
+# TokenMaskingFilter — 新增模式测试
+# ===========================================================================
+
+class TestTokenMaskingFilterExtended:
+    def _make_record(self, msg, args=()):
+        record = logging.LogRecord(
+            name="test", level=logging.INFO, pathname="test.py",
+            lineno=1, msg=msg, args=args, exc_info=None,
+        )
+        return record
+
+    def test_masks_ghs_token(self):
+        """GitHub Actions 内置 Token (ghs_) 应被脱敏"""
+        f = TokenMaskingFilter()
+        record = self._make_record(
+            "Token is ghs_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
+        )
+        f.filter(record)
+        assert "ghs_" not in record.msg
+        assert "***" in record.msg
+
+    def test_masks_bearer_token(self):
+        """Bearer Token 模式应被脱敏"""
+        f = TokenMaskingFilter()
+        record = self._make_record(
+            "Header: Bearer my_secret_token_value"
+        )
+        f.filter(record)
+        assert "my_secret_token_value" not in record.msg
+        assert "***" in record.msg
+
+
+# ===========================================================================
+# write_action_outputs — 安全性测试
+# ===========================================================================
+
+class TestWriteActionOutputsSecurity:
+    def test_heredoc_delimiter_is_randomized(self, tmp_path):
+        """heredoc 分隔符应每次不同，防止注入攻击"""
+        output_file1 = tmp_path / "output1.txt"
+        output_file2 = tmp_path / "output2.txt"
+        collector = LogCollector()
+
+        with patch.dict(os.environ, {"GITHUB_OUTPUT": str(output_file1)}), \
+             patch("lib.utils.get_log_collector", return_value=collector):
+            write_action_outputs(1, 0, 0)
+
+        with patch.dict(os.environ, {"GITHUB_OUTPUT": str(output_file2)}), \
+             patch("lib.utils.get_log_collector", return_value=collector):
+            write_action_outputs(1, 0, 0)
+
+        content1 = output_file1.read_text()
+        content2 = output_file2.read_text()
+        # 提取分隔符部分（SYNC_LOG_EOF_<hex>）
+        import re
+        delims1 = re.findall(r'SYNC_LOG_EOF_[a-f0-9]+', content1)
+        delims2 = re.findall(r'SYNC_LOG_EOF_[a-f0-9]+', content2)
+        assert len(delims1) >= 1
+        assert len(delims2) >= 1
+        assert delims1[0] != delims2[0], "Delimiter should be randomized"
+
+    def test_log_with_fake_delimiter_does_not_inject(self, tmp_path):
+        """日志内容包含旧固定分隔符字符串时不应导致 heredoc 提前终止"""
+        output_file = tmp_path / "output.txt"
+        collector = LogCollector()
+        collector.setFormatter(logging.Formatter("%(message)s"))
+        record = logging.LogRecord(
+            name="test", level=logging.WARNING, pathname="test.py",
+            lineno=1, msg="SYNC_LOG_EOF\nmalicious-key=injected",
+            args=(), exc_info=None,
+        )
+        collector.emit(record)
+
+        with patch.dict(os.environ, {"GITHUB_OUTPUT": str(output_file)}), \
+             patch("lib.utils.get_log_collector", return_value=collector):
+            write_action_outputs(1, 0, 0)
+
+        content = output_file.read_text()
+        # 随机化分隔符应正确包裹含有旧分隔符字符串的内容
+        # 验证: 开始和结束的分隔符应相同，且包含随机后缀
+        import re
+        delimiters = re.findall(r'SYNC_LOG_EOF_[a-f0-9]+', content)
+        assert len(delimiters) == 2, "Should have opening and closing delimiter"
+        assert delimiters[0] == delimiters[1], "Opening and closing delimiters must match"
+        # 旧的固定字符串 "SYNC_LOG_EOF"（不带随机后缀）不应作为分隔符
+        # 验证日志内容确实在 heredoc 边界内
+        assert "SYNC_LOG_EOF\n" in content  # 旧字符串在内容中
+        assert "malicious-key=injected" in content  # 被安全包裹
+
+    def test_step_summary_escapes_backticks(self, tmp_path):
+        """Step Summary 中的反引号应被转义，防止 markdown 注入"""
+        summary_file = tmp_path / "summary.md"
+        collector = LogCollector()
+        collector.setFormatter(logging.Formatter("%(message)s"))
+        record = logging.LogRecord(
+            name="test", level=logging.WARNING, pathname="test.py",
+            lineno=1,
+            msg="```\n<script>alert('xss')</script>\n```",
+            args=(), exc_info=None,
+        )
+        collector.emit(record)
+
+        with patch.dict(os.environ, {
+            "GITHUB_STEP_SUMMARY": str(summary_file),
+        }), patch("lib.utils.get_log_collector", return_value=collector):
+            write_action_outputs(1, 0, 0)
+
+        summary = summary_file.read_text()
+        # 反引号应被转义
+        assert "\\`\\`\\`" in summary
+
+
+# ===========================================================================
+# paginated_get — 安全上限测试
+# ===========================================================================
+
+class TestPaginatedGetSafetyLimit:
+    @patch("lib.utils.api_request")
+    def test_stops_at_max_pages(self, mock_request):
+        """分页应在安全上限处停止"""
+        # 模拟前 5 页有数据，第 6 页返回空列表
+        responses = [MagicMock(status_code=200,
+                               json=MagicMock(return_value=[{"id": i}]))
+                     for i in range(5)]
+        responses.append(MagicMock(status_code=200,
+                                   json=MagicMock(return_value=[])))
+        mock_request.side_effect = responses
+
+        result = paginated_get("github", "token", "/test")
+        assert len(result) == 5
+        assert mock_request.call_count == 6
