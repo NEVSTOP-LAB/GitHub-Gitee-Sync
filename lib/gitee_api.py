@@ -44,7 +44,7 @@ import logging
 
 import requests
 
-from .utils import GITEE_API, api_request, gitee_headers
+from .utils import GITEE_API, api_request, gitee_headers, sanitize_response_text
 
 
 # ===========================================================================
@@ -145,7 +145,8 @@ def get_gitee_repos(owner, token, account_type, include_private=True):
         resp = api_request("GET", url, headers=gitee_headers(token), params=params)
         if resp.status_code != 200:
             raise Exception(
-                f"Failed to fetch Gitee repos: {resp.status_code} {resp.text}"
+                f"Failed to fetch Gitee repos: "
+                f"{resp.status_code} {sanitize_response_text(resp.text)}"
             )
 
         data = resp.json()
@@ -242,7 +243,7 @@ def create_gitee_repo(owner, token, repo_name, private, description, account_typ
 
     logging.error(
         f"  Failed to create Gitee repo {repo_name}: "
-        f"{resp.status_code} {resp.text}"
+        f"{resp.status_code} {sanitize_response_text(resp.text)}"
     )
     return False
 
