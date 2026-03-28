@@ -56,6 +56,7 @@ def validate_gitee_token(token):
     """验证 Gitee Token 是否有效。
 
     调用 GET /api/v5/user 接口检测 Token 认证状态。
+    复用 api_request 统一请求封装，获得重试、超时、日志脱敏能力。
     对应需求: docs/计划/错误处理设计.md — "认证错误 → 立即退出，提供清晰指引"
 
     Args:
@@ -69,10 +70,10 @@ def validate_gitee_token(token):
     """
     logging.info("Validating Gitee token ...")
     try:
-        resp = requests.get(
-            f"{GITEE_API}/user",
+        resp = api_request(
+            "GET", f"{GITEE_API}/user",
             headers=gitee_headers(token),
-            timeout=30,
+            max_retries=2,
         )
         if resp.status_code == 401:
             raise Exception(

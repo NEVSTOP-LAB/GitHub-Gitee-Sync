@@ -39,31 +39,31 @@ def _make_resp(data, status=200, headers=None):
 
 class TestValidateGithubToken:
     def test_valid_token_returns_login(self):
-        with patch("lib.github_api.requests.get",
+        with patch("lib.github_api.api_request",
                    return_value=_make_resp({"login": "testuser"})):
             user = validate_github_token("valid_token")
         assert user == "testuser"
 
     def test_invalid_token_raises_on_401(self):
-        with patch("lib.github_api.requests.get",
+        with patch("lib.github_api.api_request",
                    return_value=_make_resp({}, status=401)):
             with pytest.raises(Exception, match="401"):
                 validate_github_token("bad_token")
 
     def test_other_error_code_raises(self):
-        with patch("lib.github_api.requests.get",
+        with patch("lib.github_api.api_request",
                    return_value=_make_resp({}, status=500)):
             with pytest.raises(Exception, match="500"):
                 validate_github_token("token")
 
     def test_network_error_raises(self):
-        with patch("lib.github_api.requests.get",
+        with patch("lib.github_api.api_request",
                    side_effect=requests.ConnectionError("no network")):
             with pytest.raises(Exception, match="network error"):
                 validate_github_token("token")
 
     def test_unknown_login_defaults_to_unknown(self):
-        with patch("lib.github_api.requests.get",
+        with patch("lib.github_api.api_request",
                    return_value=_make_resp({})):
             user = validate_github_token("token")
         assert user == "unknown"

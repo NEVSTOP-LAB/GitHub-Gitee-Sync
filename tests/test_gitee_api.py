@@ -39,31 +39,31 @@ def _make_resp(data, status=200):
 
 class TestValidateGiteeToken:
     def test_valid_token_returns_login(self):
-        with patch("lib.gitee_api.requests.get",
+        with patch("lib.gitee_api.api_request",
                    return_value=_make_resp({"login": "giteeuser"})):
             user = validate_gitee_token("valid_token")
         assert user == "giteeuser"
 
     def test_invalid_token_raises_on_401(self):
-        with patch("lib.gitee_api.requests.get",
+        with patch("lib.gitee_api.api_request",
                    return_value=_make_resp({}, status=401)):
             with pytest.raises(Exception, match="401"):
                 validate_gitee_token("bad_token")
 
     def test_other_error_code_raises(self):
-        with patch("lib.gitee_api.requests.get",
+        with patch("lib.gitee_api.api_request",
                    return_value=_make_resp({}, status=500)):
             with pytest.raises(Exception, match="500"):
                 validate_gitee_token("token")
 
     def test_network_error_raises(self):
-        with patch("lib.gitee_api.requests.get",
+        with patch("lib.gitee_api.api_request",
                    side_effect=requests.ConnectionError("no network")):
             with pytest.raises(Exception, match="network error"):
                 validate_gitee_token("token")
 
     def test_unknown_login_defaults_to_unknown(self):
-        with patch("lib.gitee_api.requests.get",
+        with patch("lib.gitee_api.api_request",
                    return_value=_make_resp({})):
             user = validate_gitee_token("token")
         assert user == "unknown"
