@@ -191,7 +191,8 @@ def mask_token(text):
     text = re.sub(r'https://[^@\s]+@', 'https://***@', text)
 
     # 2. 查询参数中的 token: ?access_token=xxx&...
-    text = re.sub(r'[?&]access_token=[^&\s]+', '?access_token=***', text)
+    # 保留原始分隔符 (? 或 &) 以避免生成形如 foo=1?access_token=*** 的非法 URL
+    text = re.sub(r'([?&])access_token=[^&\s]+', r'\1access_token=***', text)
 
     # 3. GitHub Personal Access Tokens (ghp_, gho_, github_pat_)
     text = re.sub(r'ghp_[a-zA-Z0-9]{36}', 'ghp_***', text)
@@ -201,8 +202,9 @@ def mask_token(text):
     # 4. Bearer tokens in headers (捕获 Authorization: Bearer <token>)
     text = re.sub(r'Bearer\s+[a-zA-Z0-9_\-\.]{20,}', 'Bearer ***', text)
 
-    # 5. 通用长字符串 token (长度>30的字母数字混合字符串)
-    # 注意: 这个规则可能过于激进，但为了安全起见仍然保留
+    # 5. 通用长字符串 token (长度>40的字母数字混合字符串)
+    # 注意: 匹配 {40,} 但仅脱敏长度 > 40 的字符串，跳过恰好 40 字符的
+    # SHA-1 哈希（git commit hash 等），避免误脱敏非 token 内容
     text = re.sub(
         r'\b[a-zA-Z0-9_\-]{40,}\b',
         lambda m: m.group(0)[:8] + '***' if len(m.group(0)) > 40 else m.group(0),
@@ -262,12 +264,8 @@ def make_git_env(token):
     安全修复: 使用 Python 脚本代替 shell 脚本，避免命令注入风险
     """
     # 创建临时 askpass Python 脚本，避免 shell 注入风险
-    # 使用 os.open() with O_CREAT|O_EXCL 原子性创建文件并设置权限
-    askpass_path = tempfile.mktemp(prefix="git_askpass_", suffix=".py")
-
-    # 原子性创建文件，设置仅当前用户可读写（0o600）
-    # 使用 O_EXCL 确保不会覆盖已存在的文件（防止 TOCTOU 攻击）
-    fd = os.open(askpass_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    # 使用 mkstemp() 原子性创建唯一文件，避免 mktemp 的安全隐患
+    fd, askpass_path = tempfile.mkstemp(prefix="git_askpass_", suffix=".py")
     try:
         # 使用 Python 脚本打印 token，完全避免 shell 解释
         script_content = (
