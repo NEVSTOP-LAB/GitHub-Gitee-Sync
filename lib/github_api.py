@@ -71,7 +71,7 @@ def validate_github_token(token):
     try:
         resp = requests.get(
             f"{GITHUB_API}/user",
-            headers={"Authorization": f"token {token}"},
+            headers={"Authorization": f"Bearer {token}"},
             timeout=30,
         )
         if resp.status_code == 401:

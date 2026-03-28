@@ -488,7 +488,7 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
                 dl_url = asset_api_url
                 dl_kwargs = {
                     "headers": {
-                        "Authorization": f"token {source_token}",
+                        "Authorization": f"Bearer {source_token}",
                         "Accept": "application/octet-stream",
                     },
                     "timeout": 300,
@@ -539,7 +539,7 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
                         up_resp = api_request(
                             "POST", upload_url,
                             headers={
-                                "Authorization": f"token {target_token}",
+                                "Authorization": f"Bearer {target_token}",
                                 "Content-Type": content_type,
                             },
                             data=f,

@@ -225,11 +225,11 @@ def github_headers(token):
     """构建 GitHub API 标准请求头。
 
     对应: docs/调研/GitHub-API.md — "认证方式"
-    - Authorization: token <TOKEN>
+    - Authorization: Bearer <TOKEN> (GitHub 推荐格式)
     - Accept: application/vnd.github.v3+json
     """
     return {
-        "Authorization": f"token {token}",
+        "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github.v3+json",
     }
 

@@ -166,7 +166,7 @@ class TestMakeGitEnv:
 class TestGithubHeaders:
     def test_contains_authorization(self):
         headers = github_headers("mytoken")
-        assert headers["Authorization"] == "token mytoken"
+        assert headers["Authorization"] == "Bearer mytoken"
 
     def test_contains_accept(self):
         headers = github_headers("mytoken")
