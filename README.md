@@ -18,12 +18,12 @@ Sync All the Repos(public/private) between GitHub and Gitee.
 - 🎬 提供 GitHub Action，一键集成到 Workflow
 - 📋 自动在目标平台创建不存在的仓库（可配置关闭）
 
+---
+
 ## 快速开始
 
 ### 前置条件
 
-- Python 3.8+
-- Git
 - [GitHub Personal Access Token](https://github.com/settings/tokens)（需要 `repo` 权限）
 - [Gitee Personal Access Token](https://gitee.com/profile/personal_access_tokens)（需要 `projects` 权限）
 
@@ -76,7 +76,12 @@ docker run --rm \
   -e GITEE_OWNER=<Gitee用户名或组织名> \
   -e GITEE_TOKEN=<Gitee Token> \
   github-gitee-sync
+
+# 也可以使用 .env 文件
+docker run --rm --env-file .env github-gitee-sync
 ```
+
+---
 
 ## 参数说明
 
@@ -94,19 +99,11 @@ docker run --rm \
 | 附属信息同步 | `SYNC_EXTRA` | `--sync-extra` | ❌ | 空 | 逗号分隔：`releases,wiki,labels,milestones,issues` |
 | 干运行模式 | `DRY_RUN` | `--dry-run` | ❌ | `false` | 运行全部逻辑但不实际同步，用于调试和测试 |
 
+---
+
 ## 使用示例
 
-### GitHub Action
-
 ```yaml
-# 同步个人账号全部仓库
-- uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1
-  with:
-    github-owner: myuser
-    github-token: ${{ secrets.GH_TOKEN }}
-    gitee-owner: myuser
-    gitee-token: ${{ secrets.GITEE_TOKEN }}
-
 # 反向同步：Gitee → GitHub
 - uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1
   with:
@@ -135,17 +132,7 @@ docker run --rm \
     account-type: org
     exclude-repos: 'old-repo,deprecated-repo'
 
-# 不自动创建仓库 + 同步 Releases 和 Wiki
-- uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1
-  with:
-    github-owner: myuser
-    github-token: ${{ secrets.GH_TOKEN }}
-    gitee-owner: myuser
-    gitee-token: ${{ secrets.GITEE_TOKEN }}
-    create-missing-repos: 'false'
-    sync-extra: 'releases,wiki'
-
-# 仅同步公开仓库 + 获取结果
+# 同步 Releases 和 Wiki，读取 Action 输出
 - uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1
   id: sync
   with:
@@ -153,82 +140,11 @@ docker run --rm \
     github-token: ${{ secrets.GH_TOKEN }}
     gitee-owner: myuser
     gitee-token: ${{ secrets.GITEE_TOKEN }}
-    include-private: 'false'
+    sync-extra: 'releases,wiki'
 - run: echo "Synced ${{ steps.sync.outputs['synced-count'] }} repos"
 ```
 
-### Python CLI
-
-```bash
-# 同步个人账号全部仓库（默认 GitHub → Gitee）
-python sync.py \
-  --github-owner myuser \
-  --gitee-owner myuser
-
-# 反向同步：Gitee → GitHub
-python sync.py \
-  --github-owner myuser \
-  --gitee-owner myuser \
-  --direction gitee2github
-
-# 双向同步
-python sync.py \
-  --github-owner myuser \
-  --gitee-owner myuser \
-  --direction both
-
-# 同步组织仓库，排除部分仓库
-python sync.py \
-  --github-owner my-org \
-  --gitee-owner my-org \
-  --account-type org \
-  --exclude-repos "old-repo,deprecated-repo"
-
-# 仅同步公开仓库，不自动创建目标仓库
-python sync.py \
-  --github-owner myuser \
-  --gitee-owner myuser \
-  --include-private false \
-  --create-missing-repos false
-
-# 同步代码 + Releases + Wiki + Labels
-python sync.py \
-  --github-owner myuser \
-  --gitee-owner myuser \
-  --sync-extra "releases,wiki,labels"
-
-# Dry-run 模式：运行全部逻辑但不实际同步
-python sync.py \
-  --github-owner myuser \
-  --gitee-owner myuser \
-  --dry-run true
-```
-
-## 技术方案
-
-- 通过 GitHub REST API 获取仓库列表
-- 通过 Gitee API v5 管理目标仓库
-- 使用 `git clone --mirror` + `git push --mirror` 实现完整同步
-- 通过 REST API 同步 Releases、Labels、Milestones 等附属信息
-- 通过 Git mirror 方式同步 Wiki
-- 自动处理分页、仓库创建、错误重试
-
-## 项目结构
-
-```
-├── sync.py              # 主入口: 参数解析、同步编排
-├── lib/
-│   ├── __init__.py
-│   ├── utils.py         # 通用工具: 日志、HTTP请求、Token脱敏
-│   ├── github_api.py    # GitHub REST API 封装
-│   ├── gitee_api.py     # Gitee REST API 封装
-│   └── sync_repo.py     # 单仓库同步: mirror、metadata、extras
-├── entrypoint.sh        # Docker/Action 入口桥接脚本
-├── action.yml           # GitHub Action 元数据
-├── Dockerfile           # Docker 容器定义
-├── requirements.txt     # Python 依赖
-└── docs/                # 调研与设计文档
-```
+---
 
 ## Action Outputs
 
@@ -247,43 +163,9 @@ python sync.py \
 | 2 | 全部失败 |
 | 3 | 致命错误（认证失败、环境异常） |
 
-## 环境变量方式
-
-```bash
-export GITHUB_OWNER=myuser
-export GITHUB_TOKEN=ghp_xxxx
-export GITEE_OWNER=myuser
-export GITEE_TOKEN=xxxxx
-export SYNC_DIRECTION=github2gitee
-export CREATE_MISSING_REPOS=true
-export SYNC_EXTRA=releases,wiki
-
-python sync.py
-```
-
-## Docker 环境变量方式
-
-```bash
-docker run --rm \
-  -e GITHUB_OWNER=myuser \
-  -e GITHUB_TOKEN=ghp_xxxx \
-  -e GITEE_OWNER=myuser \
-  -e GITEE_TOKEN=xxxxx \
-  -e SYNC_DIRECTION=github2gitee \
-  -e CREATE_MISSING_REPOS=true \
-  -e SYNC_EXTRA=releases,wiki \
-  github-gitee-sync
-```
-
-也可以使用 `.env` 文件：
-
-```bash
-docker run --rm --env-file .env github-gitee-sync
-```
+---
 
 ## 文档
-
-详细的调研和开发计划请参见 `docs/` 目录：
 
 - **调研文档**
   - [GitHub API 调研](docs/调研/GitHub-API.md)
@@ -299,6 +181,11 @@ docker run --rm --env-file .env github-gitee-sync
   - [流程图](docs/计划/流程图.md)
   - [错误处理设计](docs/计划/错误处理设计.md)
   - [开发步骤](docs/计划/开发步骤.md)
+
+- **实施记录**
+  - [实施记录](docs/实施记录.md)（模块结构、技术选择、代码审查反馈实施）
+
+---
 
 ## License
 
