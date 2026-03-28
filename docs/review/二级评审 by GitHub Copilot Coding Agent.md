@@ -3,6 +3,8 @@
 **评审范围**: 基于 Claude Sonnet、Codex、GitHub Copilot 三份初次评审的再评审
 **评审日期**: 2026-03-28
 
+**修订记录**: 2026-03-28 根据评审结果进行代码修订
+
 **过滤原则**:
 - ❌ 忽略重构建议（策略模式、配置类/dataclass、模块拆分、类型注解等）
 - ❌ 忽略增加架构复杂度的建议（并发同步、增量同步、结构化日志、健康检查端点、进度条等）
@@ -14,7 +16,7 @@
 
 ## 🔴 高优先级
 
-### 1. Gitee Token 暴露在 URL 查询参数中 [安全]
+### 1. ✅ Gitee Token 暴露在 URL 查询参数中 [安全]
 
 **提出者**: GitHub Copilot
 
@@ -30,7 +32,7 @@ def gitee_headers(token):
 
 ---
 
-### 2. `both` 双向同步模式存在数据覆盖风险 [正确性]
+### 2. 📝 `both` 双向同步模式存在数据覆盖风险 [正确性]
 
 **提出者**: GitHub Copilot
 
@@ -42,7 +44,7 @@ def gitee_headers(token):
 
 ---
 
-### 3. 全部跳过时退出码为 0，语义不清 [正确性]
+### 3. ✅ 全部跳过时退出码为 0，语义不清 [正确性]
 
 **提出者**: GitHub Copilot
 
@@ -54,7 +56,7 @@ def gitee_headers(token):
 
 ---
 
-### 4. Token 校验未复用统一请求封装 [安全/健壮性]
+### 4. ✅ Token 校验未复用统一请求封装 [安全/健壮性]
 
 **提出者**: Codex
 
@@ -66,7 +68,7 @@ def gitee_headers(token):
 
 ---
 
-### 5. 日志中 Token 可能遗漏脱敏 [安全]
+### 5. ✅ 日志中 Token 可能遗漏脱敏 [安全]
 
 **提出者**: Claude Sonnet
 
@@ -97,7 +99,7 @@ class TokenMaskingFilter(logging.Filter):
 
 ## 🟡 中优先级
 
-### 6. `sync_extra` 参数对无效值静默忽略 [可用性]
+### 6. ✅ `sync_extra` 参数对无效值静默忽略 [可用性]
 
 **提出者**: GitHub Copilot + Codex
 
@@ -115,7 +117,7 @@ if invalid:
 
 ---
 
-### 7. `sync_issues` 仅同步 open 状态 issue，不同步关闭/更新 [功能局限]
+### 7. 📝 `sync_issues` 仅同步 open 状态 issue，不同步关闭/更新 [功能局限]
 
 **提出者**: GitHub Copilot
 
@@ -129,7 +131,7 @@ if invalid:
 
 ---
 
-### 8. Wiki 同步失败仅 debug 日志，用户无感知 [可用性]
+### 8. ✅ Wiki 同步失败仅 debug 日志，用户无感知 [可用性]
 
 **提出者**: GitHub Copilot + Claude Sonnet
 
@@ -141,7 +143,7 @@ if invalid:
 
 ---
 
-### 9. Release Asset 同名文件不更新 [正确性]
+### 9. ✅ Release Asset 同名文件不更新 [正确性]
 
 **提出者**: GitHub Copilot + Codex
 
@@ -156,7 +158,7 @@ if invalid:
 
 ---
 
-### 10. 无法过滤 Fork 仓库 [功能]
+### 10. ⏭️ 无法过滤 Fork 仓库 [功能]
 
 **提出者**: GitHub Copilot
 
@@ -168,7 +170,7 @@ if invalid:
 
 ---
 
-### 11. `git push --mirror` 会删除目标端独有的分支/标签 [文档]
+### 11. ⏭️ `git push --mirror` 会删除目标端独有的分支/标签 [文档]
 
 **提出者**: GitHub Copilot
 
@@ -180,7 +182,7 @@ if invalid:
 
 ---
 
-### 12. Action 输出仅有总数，失败定位粗粒度 [可观测性]
+### 12. ⏭️ Action 输出仅有总数，失败定位粗粒度 [可观测性]
 
 **提出者**: Codex
 
@@ -192,7 +194,7 @@ if invalid:
 
 ---
 
-### 13. `github_headers` 使用旧版 `token` 格式 [标准化]
+### 13. ✅ `github_headers` 使用旧版 `token` 格式 [标准化]
 
 **提出者**: GitHub Copilot
 
@@ -206,7 +208,7 @@ if invalid:
 
 ## 🟢 低优先级
 
-### 14. `paginated_get` 对非 list 响应静默返回空列表 [健壮性]
+### 14. ✅ `paginated_get` 对非 list 响应静默返回空列表 [健壮性]
 
 **提出者**: GitHub Copilot
 
@@ -223,7 +225,7 @@ else:
 
 ---
 
-### 15. `GITHUB_TOKEN` 环境变量名与 GitHub Actions 内置变量冲突 [可用性]
+### 15. ✅ `GITHUB_TOKEN` 环境变量名与 GitHub Actions 内置变量冲突 [可用性]
 
 **提出者**: GitHub Copilot
 
@@ -235,7 +237,7 @@ else:
 
 ---
 
-### 16. Gitee issue number 类型不一致 [潜在 Bug]
+### 16. ⏭️ Gitee issue number 类型不一致 [潜在 Bug]
 
 **提出者**: GitHub Copilot
 
@@ -247,7 +249,7 @@ else:
 
 ---
 
-### 17. Dockerfile 未锁定 Python 基础镜像 patch 版本 [可复现性]
+### 17. ✅ Dockerfile 未锁定 Python 基础镜像 patch 版本 [可复现性]
 
 **提出者**: GitHub Copilot
 
@@ -259,7 +261,7 @@ else:
 
 ---
 
-### 18. 缺少 `github_api.py` 和 `gitee_api.py` 的单元测试 [测试覆盖]
+### 18. ✅ 缺少 `github_api.py` 和 `gitee_api.py` 的单元测试 [测试覆盖]
 
 **提出者**: GitHub Copilot
 
@@ -271,7 +273,7 @@ else:
 
 ---
 
-### 19. `base64 -d` 在 macOS 上不兼容 [兼容性]
+### 19. ⏭️ `base64 -d` 在 macOS 上不兼容 [兼容性]
 
 **提出者**: GitHub Copilot
 
@@ -286,7 +288,7 @@ python3 -c "import base64,sys; sys.stdout.write(base64.b64decode('{encoded}').de
 
 ---
 
-### 20. 预热阶段缺少网络连通性检查 [健壮性]
+### 20. ⏭️ 预热阶段缺少网络连通性检查 [健壮性]
 
 **提出者**: Codex
 
