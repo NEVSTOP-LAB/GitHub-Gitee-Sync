@@ -327,3 +327,15 @@ class TestSyncAll:
             sync_all(self._make_args(dry_run=True))
         log_messages = [str(c) for c in mock_log.call_args_list]
         assert any("DRY-RUN" in msg for msg in log_messages)
+
+    def test_all_skipped_returns_0_with_warning(self):
+        """全部跳过时退出码为 0 但应输出警告"""
+        with patch("sync.sync_one_direction",
+                   return_value=(0, 0, 5, [])), \
+             patch("sync.write_action_outputs"), \
+             patch("sync.logging.warning") as mock_warn:
+            code = sync_all(self._make_args())
+        assert code == 0
+        mock_warn.assert_called_once()
+        warning_msg = str(mock_warn.call_args)
+        assert "skipped" in warning_msg.lower()

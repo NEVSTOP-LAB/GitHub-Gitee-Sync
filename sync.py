@@ -457,6 +457,18 @@ def sync_all(args):
     write_action_outputs(total_synced, total_failed, total_skipped)
 
     # === 确定退出码 ===
+    # 对应: docs/计划/错误处理设计.md — 退出码设计
+    #   0 = 全部成功（有仓库被同步）
+    #   1 = 部分失败（有成功也有失败）
+    #   2 = 全部失败
+    #   3 = 致命错误（认证失败、环境异常）
+    # 二级评审 Issue #3: 全部跳过时给出明确警告
+    if total_failed == 0 and total_synced == 0 and total_skipped > 0:
+        logging.warning(
+            "All repositories were skipped — no repos were actually synced. "
+            "Check create_missing_repos setting and target repo availability."
+        )
+        return 0
     if total_failed == 0:
         return 0  # 全部成功
     elif total_synced > 0:
