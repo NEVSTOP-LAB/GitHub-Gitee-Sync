@@ -61,19 +61,56 @@ class TokenMaskingFilter(logging.Filter):
         return True
 
 
+class LogCollector(logging.Handler):
+    """日志收集器：在内存中收集所有日志消息，供后续输出到 Action outputs。
+
+    仅收集 WARNING 及以上级别的日志消息，用于提供精简的问题诊断信息。
+    所有收集的消息已经过 TokenMaskingFilter 处理，不含敏感信息。
+    """
+
+    def __init__(self):
+        super().__init__(level=logging.WARNING)
+        self.records = []
+
+    def emit(self, record):
+        self.records.append(self.format(record))
+
+    def get_log(self):
+        """返回收集到的全部日志文本（换行分隔）。"""
+        return "\n".join(self.records)
+
+
+# 全局日志收集器实例
+_log_collector = None
+
+
+def get_log_collector():
+    """获取全局 LogCollector 实例（在 setup_logging 之后可用）。"""
+    return _log_collector
+
+
 def setup_logging():
     """配置日志格式与级别。
 
     使用 [LEVEL] message 格式输出到 stdout，方便在 GitHub Action 日志中查看。
     安装 TokenMaskingFilter 自动拦截日志中的 Token 信息。
+    安装 LogCollector 收集 WARNING+ 级别日志，供 Action output 使用。
     """
+    global _log_collector
+
     logging.basicConfig(
         level=logging.INFO,
         format="[%(levelname)s] %(message)s",
         stream=sys.stdout,
     )
     # 在根 logger 上安装 Token 脱敏过滤器
-    logging.getLogger().addFilter(TokenMaskingFilter())
+    root = logging.getLogger()
+    root.addFilter(TokenMaskingFilter())
+
+    # 安装日志收集器，收集 WARNING+ 级别日志到内存
+    _log_collector = LogCollector()
+    _log_collector.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+    root.addHandler(_log_collector)
 
 
 # ===========================================================================
@@ -354,11 +391,31 @@ def write_action_outputs(synced, failed, skipped):
     """将同步结果写入 GitHub Action outputs。
 
     检测 $GITHUB_OUTPUT 环境变量是否存在，如存在则追加写入。
+    同时将 WARNING+ 日志写入 sync-log output 和 $GITHUB_STEP_SUMMARY。
     对应需求: docs/计划/开发步骤.md — Step 13 "适配 sync.py 输出"
     """
+    # 收集日志信息
+    collector = get_log_collector()
+    log_text = collector.get_log() if collector else ""
+
     output_file = os.environ.get("GITHUB_OUTPUT")
     if output_file:
         with open(output_file, "a") as f:
             f.write(f"synced-count={synced}\n")
             f.write(f"failed-count={failed}\n")
             f.write(f"skipped-count={skipped}\n")
+            # 多行输出使用 heredoc 语法
+            f.write(f"sync-log<<SYNC_LOG_EOF\n{log_text}\nSYNC_LOG_EOF\n")
+
+    # 写入 GitHub Step Summary 以便在 Actions UI 中直接查看
+    summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary_file:
+        with open(summary_file, "a") as f:
+            f.write("## Sync Summary\n\n")
+            f.write(f"| Metric | Count |\n|--------|-------|\n")
+            f.write(f"| ✅ Synced | {synced} |\n")
+            f.write(f"| ❌ Failed | {failed} |\n")
+            f.write(f"| ⏭️ Skipped | {skipped} |\n\n")
+            if log_text:
+                f.write("### Warnings & Errors\n\n")
+                f.write(f"```\n{log_text}\n```\n")

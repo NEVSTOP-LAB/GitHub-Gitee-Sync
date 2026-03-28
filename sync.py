@@ -35,6 +35,7 @@ import sys
 from lib.utils import (
     build_clone_url,
     check_git_installed,
+    get_log_collector,
     setup_logging,
     write_action_outputs,
 )
@@ -76,6 +77,7 @@ def parse_args():
     │ --gitee-token         │ GITEE_TOKEN          │ ✅   │ -            │
     │ --account-type        │ ACCOUNT_TYPE         │ ❌   │ user         │
     │ --include-private     │ INCLUDE_PRIVATE      │ ❌   │ true         │
+    │ --include-repos       │ INCLUDE_REPOS        │ ❌   │ (空)         │
     │ --exclude-repos       │ EXCLUDE_REPOS        │ ❌   │ (空)         │
     │ --direction           │ SYNC_DIRECTION       │ ❌   │ github2gitee │
     │ --create-missing-repos│ CREATE_MISSING_REPOS │ ❌   │ true         │
@@ -120,6 +122,15 @@ def parse_args():
         "--include-private",
         default=os.environ.get("INCLUDE_PRIVATE", "true"),
         help="Whether to include private repositories (default: true)",
+    )
+    parser.add_argument(
+        "--include-repos",
+        default=os.environ.get("INCLUDE_REPOS", ""),
+        help=(
+            "Comma-separated list of repository names to include (allow list). "
+            "When set, ONLY these repos are synced. "
+            "Takes precedence over exclude-repos."
+        ),
     )
     parser.add_argument(
         "--exclude-repos",
@@ -168,6 +179,9 @@ def parse_args():
     args.dry_run = str(args.dry_run).lower() in ("true", "1", "yes")
 
     # --- 逗号分隔列表解析 ---
+    args.include_repos = set(
+        r.strip() for r in args.include_repos.split(",") if r.strip()
+    )
     args.exclude_repos = set(
         r.strip() for r in args.exclude_repos.split(",") if r.strip()
     )
@@ -182,6 +196,13 @@ def parse_args():
     if invalid:
         logging.warning(f"Unknown sync-extra values ignored: {invalid}")
         args.sync_extra = args.sync_extra & VALID_EXTRA
+
+    # --- include_repos 与 exclude_repos 冲突校验 ---
+    if args.include_repos and args.exclude_repos:
+        logging.warning(
+            "Both include-repos and exclude-repos are set. "
+            "include-repos takes precedence; exclude-repos will be ignored."
+        )
 
     # --- 必填参数校验 ---
     missing = []
@@ -207,8 +228,9 @@ def parse_args():
 
 def sync_one_direction(source_platform, target_platform, source_owner,
                        target_owner, source_token, target_token,
-                       account_type, include_private, exclude_repos,
-                       create_missing_repos, sync_extra, dry_run=False):
+                       account_type, include_private, include_repos,
+                       exclude_repos, create_missing_repos, sync_extra,
+                       dry_run=False):
     """执行单方向同步: 从 source 平台到 target 平台。
 
     对应需求: docs/计划/流程图.md — "主同步流程" 步骤 4-8
@@ -250,8 +272,18 @@ def sync_one_direction(source_platform, target_platform, source_owner,
 
     logging.info(f"Found {len(source_repos)} repos on {source_platform}")
 
-    # === 步骤 2: 过滤排除的仓库 ===
-    if exclude_repos:
+    # === 步骤 2: 过滤仓库（include_repos 优先于 exclude_repos）===
+    if include_repos:
+        before = len(source_repos)
+        source_repos = [
+            r for r in source_repos if r["name"] in include_repos
+        ]
+        included_count = len(source_repos)
+        logging.info(
+            f"Include-repos filter applied: {included_count}/{before} repos "
+            f"matched allow list: {', '.join(sorted(include_repos))}"
+        )
+    elif exclude_repos:
         before = len(source_repos)
         source_repos = [
             r for r in source_repos if r["name"] not in exclude_repos
@@ -417,7 +449,8 @@ def sync_all(args):
             args.github_owner, args.gitee_owner,
             args.github_token, args.gitee_token,
             args.account_type, args.include_private,
-            args.exclude_repos, args.create_missing_repos,
+            args.include_repos, args.exclude_repos,
+            args.create_missing_repos,
             args.sync_extra, dry_run,
         )
         total_synced += s
@@ -438,7 +471,8 @@ def sync_all(args):
             args.gitee_owner, args.github_owner,
             args.gitee_token, args.github_token,
             args.account_type, args.include_private,
-            args.exclude_repos, args.create_missing_repos,
+            args.include_repos, args.exclude_repos,
+            args.create_missing_repos,
             args.sync_extra, dry_run,
         )
         total_synced += s
