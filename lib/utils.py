@@ -52,19 +52,19 @@ class TokenMaskingFilter(logging.Filter):
     - HTTP Authorization 头部中的 Bearer Token
     """
     TOKEN_PATTERNS = [
-        re.compile(r'ghp_[a-zA-Z0-9]{36}'),
-        re.compile(r'gho_[a-zA-Z0-9]{36}'),
-        re.compile(r'ghs_[a-zA-Z0-9]{36}'),
-        re.compile(r'github_pat_[a-zA-Z0-9_]{82}'),
-        re.compile(r'https://[^@\s]+@'),
-        re.compile(r'access_token=[^&\s]+'),
-        re.compile(r'Bearer\s+\S+', re.IGNORECASE),
+        (re.compile(r'ghp_[a-zA-Z0-9]{36}'), '***'),
+        (re.compile(r'gho_[a-zA-Z0-9]{36}'), '***'),
+        (re.compile(r'ghs_[a-zA-Z0-9]{36}'), '***'),
+        (re.compile(r'github_pat_[a-zA-Z0-9_]{82}'), '***'),
+        (re.compile(r'https://[^@\s]+@'), 'https://***@'),
+        (re.compile(r'access_token=[^&\s]+'), 'access_token=***'),
+        (re.compile(r'Bearer\s+\S+', re.IGNORECASE), 'Bearer ***'),
     ]
 
     def filter(self, record):
         message = record.getMessage()
-        for pattern in self.TOKEN_PATTERNS:
-            message = pattern.sub('***', message)
+        for pattern, replacement in self.TOKEN_PATTERNS:
+            message = pattern.sub(replacement, message)
         record.msg = message
         record.args = ()
         return True
@@ -140,8 +140,8 @@ def sanitize_response_text(text, max_len=200):
     """截断并脱敏 API 响应文本，用于安全的错误日志记录。
 
     API 错误响应可能包含 Token、认证信息或其他敏感数据。
-    此函数截断长响应并应用 Token 脱敏，防止敏感信息通过
-    错误日志泄漏。
+    此函数截断长响应并应用全部 Token 脱敏模式（与 TokenMaskingFilter
+    保持一致），防止敏感信息通过错误日志泄漏。
 
     Args:
         text: 原始响应文本。
@@ -153,7 +153,10 @@ def sanitize_response_text(text, max_len=200):
     if not text:
         return ""
     preview = text[:max_len].replace("\n", " ")
-    return mask_token(preview)
+    # 应用 TokenMaskingFilter 中定义的全部脱敏模式
+    for pattern, replacement in TokenMaskingFilter.TOKEN_PATTERNS:
+        preview = pattern.sub(replacement, preview)
+    return preview
 
 
 def build_clone_url(platform, owner, repo_name):

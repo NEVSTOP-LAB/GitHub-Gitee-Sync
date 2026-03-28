@@ -25,7 +25,7 @@ delimiter = f"SYNC_LOG_EOF_{secrets.token_hex(16)}"
 f.write(f"sync-log<<{delimiter}\n{log_text}\n{delimiter}\n")
 ```
 
-每次写入使用 `secrets.token_hex(16)` 生成的 256 位随机后缀，攻击者无法预测分隔符内容。
+每次写入使用 `secrets.token_hex(16)` 生成的 128 位随机后缀，攻击者无法预测分隔符内容。
 
 **对应文档**: `docs/计划/错误处理设计.md` — "Token 信息脱敏"；`docs/调研/GitHub-Actions.md` — "Outputs via GITHUB_OUTPUT"
 
@@ -174,6 +174,7 @@ else:
 | `TestWriteActionOutputsSecurity` | `test_heredoc_delimiter_is_randomized` | heredoc 分隔符随机化 |
 | `TestWriteActionOutputsSecurity` | `test_log_with_fake_delimiter_does_not_inject` | heredoc 注入防御 |
 | `TestWriteActionOutputsSecurity` | `test_step_summary_escapes_backticks` | markdown 反引号转义 |
-| `TestPaginatedGetSafetyLimit` | `test_stops_at_max_pages` | 分页安全上限 |
+| `TestPaginatedGetSafetyLimit` | `test_stops_on_empty_response` | 分页空响应停止 |
+| `TestPaginatedGetSafetyLimit` | `test_enforces_max_pages_safety_limit` | 分页安全上限强制执行 |
 
-**测试总数**: 169 → 179（新增 10 个安全测试）
+**测试总数**: 169 → 180（新增 11 个安全测试）
