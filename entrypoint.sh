@@ -25,6 +25,7 @@ export EXCLUDE_REPOS="${INPUT_EXCLUDE_REPOS:-$EXCLUDE_REPOS}"
 export SYNC_DIRECTION="${INPUT_DIRECTION:-${SYNC_DIRECTION:-github2gitee}}"
 export CREATE_MISSING_REPOS="${INPUT_CREATE_MISSING_REPOS:-${CREATE_MISSING_REPOS:-true}}"
 export SYNC_EXTRA="${INPUT_SYNC_EXTRA:-$SYNC_EXTRA}"
+export DRY_RUN="${INPUT_DRY_RUN:-${DRY_RUN:-false}}"
 
-# Execute sync script
-python /app/sync.py
+# Execute sync script (exec replaces shell as PID 1 for proper signal handling)
+exec python /app/sync.py

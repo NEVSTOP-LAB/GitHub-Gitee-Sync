@@ -39,6 +39,10 @@ inputs:
     description: 'Comma-separated list of extra items to sync: releases,wiki,labels,milestones,issues'
     required: false
     default: ''
+  dry-run:
+    description: 'Run all logic without actual sync (for debugging/testing)'
+    required: false
+    default: 'false'
 
 outputs:
   synced-count:

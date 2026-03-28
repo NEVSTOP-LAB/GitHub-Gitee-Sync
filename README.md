@@ -92,6 +92,7 @@ docker run --rm \
 | 同步方向 | `SYNC_DIRECTION` | `--direction` | ❌ | `github2gitee` | `github2gitee` / `gitee2github` / `both` |
 | 创建不存在的仓库 | `CREATE_MISSING_REPOS` | `--create-missing-repos` | ❌ | `true` | 目标仓库不存在时是否自动创建 |
 | 附属信息同步 | `SYNC_EXTRA` | `--sync-extra` | ❌ | 空 | 逗号分隔：`releases,wiki,labels,milestones,issues` |
+| 干运行模式 | `DRY_RUN` | `--dry-run` | ❌ | `false` | 运行全部逻辑但不实际同步，用于调试和测试 |
 
 ## 使用示例
 
@@ -195,6 +196,12 @@ python sync.py \
   --github-owner myuser \
   --gitee-owner myuser \
   --sync-extra "releases,wiki,labels"
+
+# Dry-run 模式：运行全部逻辑但不实际同步
+python sync.py \
+  --github-owner myuser \
+  --gitee-owner myuser \
+  --dry-run true
 ```
 
 ## 技术方案
@@ -205,6 +212,23 @@ python sync.py \
 - 通过 REST API 同步 Releases、Labels、Milestones 等附属信息
 - 通过 Git mirror 方式同步 Wiki
 - 自动处理分页、仓库创建、错误重试
+
+## 项目结构
+
+```
+├── sync.py              # 主入口: 参数解析、同步编排
+├── lib/
+│   ├── __init__.py
+│   ├── utils.py         # 通用工具: 日志、HTTP请求、Token脱敏
+│   ├── github_api.py    # GitHub REST API 封装
+│   ├── gitee_api.py     # Gitee REST API 封装
+│   └── sync_repo.py     # 单仓库同步: mirror、metadata、extras
+├── entrypoint.sh        # Docker/Action 入口桥接脚本
+├── action.yml           # GitHub Action 元数据
+├── Dockerfile           # Docker 容器定义
+├── requirements.txt     # Python 依赖
+└── docs/                # 调研与设计文档
+```
 
 ## Action Outputs
 
