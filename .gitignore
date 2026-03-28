@@ -25,3 +25,4 @@ Thumbs.db
 # Temp files
 *.tmp
 *.log
+.coverage
