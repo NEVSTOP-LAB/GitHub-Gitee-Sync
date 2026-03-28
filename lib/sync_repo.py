@@ -2,18 +2,19 @@
 lib/sync_repo.py — 单仓库同步模块
 
 实现单个仓库的完整同步流程，包括：
-- Git Mirror 同步（核心: git clone --mirror + git push --mirror）
+- Git 增量同步（核心: git clone --mirror + git push --all/--tags --force）
 - 仓库元信息同步（description, homepage）
 - 附属信息同步（Releases, Wiki, Labels, Milestones, Issues）
 
 对应需求文档:
 - docs/计划/流程图.md — "单仓库同步流程" (步骤 A-H)
-- docs/调研/Git-Mirror-同步机制.md — clone --mirror + push --mirror
+- docs/调研/Git-Mirror-同步机制.md — clone --mirror + push --all/--tags
 - docs/调研/仓库附属信息同步调研.md — 各附属信息同步策略
 - docs/计划/错误处理设计.md — 附属信息失败不影响仓库同步状态
 
 同步方式:
-  代码同步: git clone --mirror → git push --mirror（核心步骤，失败则仓库标记失败）
+  代码同步: git clone --mirror → git push --all --force + git push --tags --force
+            （增量同步，不会删除目标仓库独有的分支和标签）
   元信息同步: REST API PATCH（非致命，失败仅警告）
   附属信息同步: REST API CRUD（非致命，失败仅警告）
 """
@@ -61,20 +62,28 @@ SYNC_MARKER = "<!-- synced-from: {url} -->"
 
 
 # ===========================================================================
-# Git Mirror 同步
+# Git 增量同步
 # ===========================================================================
 
 
 def mirror_sync(source_url, target_url, repo_name,
                 source_token, target_token, dry_run=False):
-    """执行 git clone --mirror + git push --mirror 完成代码同步。
+    """执行 git clone --mirror + git push --all/--tags --force 完成代码同步。
 
-    这是仓库同步的核心步骤。使用 mirror 方式可以同步所有分支、标签和引用。
+    这是仓库同步的核心步骤。使用增量方式同步所有分支和标签，
+    不会删除目标仓库上独有的分支和标签。
 
     流程:
-    1. git clone --mirror <source_url> <temp_dir>  — 完整镜像克隆
-    2. git push --mirror <target_url>               — 镜像推送到目标
-    3. 清理临时目录和 askpass 脚本
+    1. git clone --mirror <source_url> <temp_dir>   — 完整镜像克隆
+    2. git push --all --force <target_url>           — 推送所有分支到目标
+    3. git push --tags --force <target_url>          — 推送所有标签到目标
+    4. 清理临时目录和 askpass 脚本
+
+    安全策略:
+    - 使用 --all + --tags 代替 --mirror 推送，确保不会删除目标仓库独有的
+      分支和标签（增量同步）。
+    - 使用 --force 确保源平台的变更能够覆盖到目标平台。
+    - 目标仓库上仅存在的分支、标签不受影响。
 
     认证方式:
     - 使用 GIT_ASKPASS 临时脚本传递 Token（不在 URL 中内联 Token）
@@ -138,12 +147,12 @@ def mirror_sync(source_url, target_url, repo_name,
             )
             return "empty"
 
-        # --- Step 2: git push --mirror (使用 target_token 认证) ---
-        logging.info(f"  Pushing to target ...")
+        # --- Step 2: git push --all --force (推送所有分支，不删除目标独有分支) ---
+        logging.info(f"  Pushing branches to target ...")
         tgt_env, tgt_askpass = make_git_env(target_token)
         askpass_paths.append(tgt_askpass)
         result = subprocess.run(
-            ["git", "push", "--mirror", target_url],
+            ["git", "push", "--all", "--force", target_url],
             cwd=temp_dir,
             capture_output=True,
             text=True,
@@ -153,7 +162,26 @@ def mirror_sync(source_url, target_url, repo_name,
 
         if result.returncode != 0:
             logging.error(
-                f"  git push --mirror failed: {mask_token(result.stderr)}"
+                f"  git push --all --force failed: "
+                f"{mask_token(result.stderr)}"
+            )
+            return "failed"
+
+        # --- Step 3: git push --tags --force (推送所有标签，不删除目标独有标签) ---
+        logging.info(f"  Pushing tags to target ...")
+        result = subprocess.run(
+            ["git", "push", "--tags", "--force", target_url],
+            cwd=temp_dir,
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT,
+            env=tgt_env,
+        )
+
+        if result.returncode != 0:
+            logging.error(
+                f"  git push --tags --force failed: "
+                f"{mask_token(result.stderr)}"
             )
             return "failed"
 
@@ -167,7 +195,7 @@ def mirror_sync(source_url, target_url, repo_name,
         logging.error(f"  Mirror sync error: {mask_token(str(e))}")
         return "failed"
     finally:
-        # --- Step 3: 清理临时目录和 askpass 脚本 ---
+        # --- Step 4: 清理临时目录和 askpass 脚本 ---
         shutil.rmtree(temp_dir, ignore_errors=True)
         for p in askpass_paths:
             try:
@@ -602,10 +630,11 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
 
 def sync_wiki(source_platform, target_platform, source_owner, target_owner,
               source_token, target_token, repo_name, dry_run=False):
-    """同步 Wiki（使用 git clone --mirror .wiki.git + git push --mirror）。
+    """同步 Wiki（使用 git clone --mirror .wiki.git + git push --all/--tags --force）。
 
     Wiki 没有统一的 REST API（GitHub 完全不支持 Wiki REST API），
-    因此使用 Git 镜像方式同步，与代码同步方式一致。
+    因此使用 Git 方式同步。使用增量推送（--all + --tags），不会删除
+    目标仓库上独有的 Wiki 页面和修改。
 
     前提条件: 目标平台已启用 Wiki（至少有一个页面或已启用 Wiki 功能）。
     源 Wiki 不存在时静默跳过（clone 会失败，但不视为错误）。
@@ -667,11 +696,11 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
                 )
                 return
 
-            # Push wiki 使用 target_token 认证
+            # Push wiki 使用 target_token 认证（增量推送，不删除目标独有内容）
             tgt_env, tgt_askpass = make_git_env(target_token)
             askpass_paths.append(tgt_askpass)
             result = subprocess.run(
-                ["git", "push", "--mirror", target_url],
+                ["git", "push", "--all", "--force", target_url],
                 cwd=temp_dir,
                 capture_output=True, text=True, timeout=GIT_TIMEOUT,
                 env=tgt_env,
@@ -681,7 +710,20 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
                     f"  Wiki push failed: {mask_token(result.stderr)}"
                 )
             else:
-                logging.info(f"  Wiki synced ✓")
+                # 推送标签（Wiki 通常无标签，但为完整性保留）
+                result = subprocess.run(
+                    ["git", "push", "--tags", "--force", target_url],
+                    cwd=temp_dir,
+                    capture_output=True, text=True, timeout=GIT_TIMEOUT,
+                    env=tgt_env,
+                )
+                if result.returncode != 0:
+                    logging.warning(
+                        f"  Wiki tags push failed: "
+                        f"{mask_token(result.stderr)}"
+                    )
+                else:
+                    logging.info(f"  Wiki synced ✓")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 

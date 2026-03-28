@@ -61,10 +61,11 @@ class TestMirrorSync:
 
     def test_successful_clone_and_push(self):
         clone_proc = _make_process(returncode=0)
-        push_proc = _make_process(returncode=0)
+        push_all_proc = _make_process(returncode=0)
+        push_tags_proc = _make_process(returncode=0)
 
         with patch("lib.sync_repo.subprocess.run",
-                   side_effect=[clone_proc, push_proc]), \
+                   side_effect=[clone_proc, push_all_proc, push_tags_proc]), \
              patch("lib.sync_repo.make_git_env",
                    return_value=({}, "/tmp/fake_askpass")) as mock_env, \
              patch("lib.sync_repo.shutil.rmtree"), \
@@ -116,9 +117,28 @@ class TestMirrorSync:
 
     def test_push_failure_returns_failed(self):
         clone_proc = _make_process(returncode=0)
-        push_proc = _make_process(returncode=1, stderr="error: push failed")
+        push_all_proc = _make_process(returncode=1, stderr="error: push failed")
         with patch("lib.sync_repo.subprocess.run",
-                   side_effect=[clone_proc, push_proc]), \
+                   side_effect=[clone_proc, push_all_proc]), \
+             patch("lib.sync_repo.make_git_env",
+                   return_value=({}, "/tmp/fake")), \
+             patch("lib.sync_repo.shutil.rmtree"), \
+             patch("lib.sync_repo.os.unlink"), \
+             patch("lib.sync_repo.tempfile.mkdtemp", return_value="/tmp/testdir"):
+            result = mirror_sync(
+                "https://github.com/src/repo.git",
+                "https://gitee.com/tgt/repo.git",
+                "repo",
+                "src_token", "tgt_token",
+            )
+        assert result == "failed"
+
+    def test_tags_push_failure_returns_failed(self):
+        clone_proc = _make_process(returncode=0)
+        push_all_proc = _make_process(returncode=0)
+        push_tags_proc = _make_process(returncode=1, stderr="error: tags push failed")
+        with patch("lib.sync_repo.subprocess.run",
+                   side_effect=[clone_proc, push_all_proc, push_tags_proc]), \
              patch("lib.sync_repo.make_git_env",
                    return_value=({}, "/tmp/fake")), \
              patch("lib.sync_repo.shutil.rmtree"), \
@@ -150,7 +170,8 @@ class TestMirrorSync:
 
     def test_askpass_scripts_cleaned_up_on_success(self):
         clone_proc = _make_process(returncode=0)
-        push_proc = _make_process(returncode=0)
+        push_all_proc = _make_process(returncode=0)
+        push_tags_proc = _make_process(returncode=0)
         askpass_paths = ["/tmp/askpass_clone.sh", "/tmp/askpass_push.sh"]
         call_count = [0]
 
@@ -161,7 +182,7 @@ class TestMirrorSync:
 
         unlinked = []
         with patch("lib.sync_repo.subprocess.run",
-                   side_effect=[clone_proc, push_proc]), \
+                   side_effect=[clone_proc, push_all_proc, push_tags_proc]), \
              patch("lib.sync_repo.make_git_env",
                    side_effect=fake_make_git_env), \
              patch("lib.sync_repo.shutil.rmtree"), \
