@@ -175,6 +175,14 @@ def parse_args():
         s.strip() for s in args.sync_extra.split(",") if s.strip()
     )
 
+    # --- sync_extra 有效值校验 ---
+    # 对应: 二级评审 Issue #6 — "sync_extra 参数对无效值静默忽略"
+    VALID_EXTRA = {"releases", "wiki", "labels", "milestones", "issues"}
+    invalid = args.sync_extra - VALID_EXTRA
+    if invalid:
+        logging.warning(f"Unknown sync-extra values ignored: {invalid}")
+        args.sync_extra = args.sync_extra & VALID_EXTRA
+
     # --- 必填参数校验 ---
     missing = []
     if not args.github_owner:
