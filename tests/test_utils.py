@@ -29,6 +29,7 @@ from lib.utils import (
     api_request,
     paginated_get,
     github_headers,
+    gitee_headers,
     write_action_outputs,
     check_git_installed,
 )
@@ -360,12 +361,12 @@ class TestPaginatedGet:
             warning_msg = str(mock_warn.call_args)
             assert "404" in warning_msg
 
-    def test_gitee_adds_access_token_param(self):
+    def test_gitee_adds_bearer_header(self):
         with patch("lib.utils.api_request",
                    return_value=self._make_resp([])) as mock_req:
             paginated_get("gitee", "mytoken", "/repos/owner/repo/labels")
             _, kwargs = mock_req.call_args
-            assert kwargs.get("params", {}).get("access_token") == "mytoken"
+            assert kwargs.get("headers", {}).get("Authorization") == "Bearer mytoken"
 
     def test_github_adds_auth_header(self):
         with patch("lib.utils.api_request",

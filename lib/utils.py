@@ -234,6 +234,15 @@ def github_headers(token):
     }
 
 
+def gitee_headers(token):
+    """构建 Gitee API 标准请求头。
+
+    使用 Bearer Token 认证方式（避免 Token 出现在 URL 查询参数中）。
+    对应: 二级评审 Issue #1 — "Gitee Token 暴露在 URL 查询参数中"
+    """
+    return {"Authorization": f"Bearer {token}"}
+
+
 def paginated_get(platform, token, path, extra_params=None):
     """通用分页 GET 请求，兼容 GitHub 和 Gitee 平台。
 
@@ -262,8 +271,7 @@ def paginated_get(platform, token, path, extra_params=None):
             kwargs = {"headers": github_headers(token), "params": p}
         else:
             url = f"{GITEE_API}{path}"
-            p["access_token"] = token
-            kwargs = {"params": p}
+            kwargs = {"headers": gitee_headers(token), "params": p}
 
         resp = api_request("GET", url, max_retries=2, **kwargs)
 

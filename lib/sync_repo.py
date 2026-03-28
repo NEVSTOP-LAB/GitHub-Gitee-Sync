@@ -32,6 +32,7 @@ from .utils import (
     GITEE_API,
     api_request,
     build_clone_url,
+    gitee_headers,
     github_headers,
     make_git_env,
     mask_token,
@@ -289,7 +290,7 @@ def sync_releases(source_platform, target_platform, source_owner, target_owner,
 
     Release Assets 同步:
     - GitHub: 通过 asset.url + Accept: application/octet-stream 下载（支持私有仓库）
-    - Gitee: 通过 browser_download_url + access_token 下载
+    - Gitee: 通过 browser_download_url + Bearer header 下载
     - 上传: GitHub 使用 uploads.github.com; Gitee 使用 attach_files 端点
     - 文件流式下载到临时文件，避免大文件导致内存溢出
     - 跳过超过 MAX_ASSET_SIZE 的文件
@@ -359,8 +360,10 @@ def sync_releases(source_platform, target_platform, source_owner, target_owner,
                     json=payload, max_retries=1,
                 )
             else:
-                payload["access_token"] = target_token
-                resp = api_request("POST", url, json=payload, max_retries=1)
+                resp = api_request(
+                    "POST", url, headers=gitee_headers(target_token),
+                    json=payload, max_retries=1,
+                )
 
             if resp.status_code in (200, 201):
                 created += 1
@@ -423,9 +426,11 @@ def _update_existing_release(target_platform, target_owner, target_token,
             json=payload, max_retries=1,
         )
     else:
-        payload["access_token"] = target_token
         payload["tag_name"] = tag
-        resp = api_request("PATCH", url, json=payload, max_retries=1)
+        resp = api_request(
+            "PATCH", url, headers=gitee_headers(target_token),
+            json=payload, max_retries=1,
+        )
 
     if resp.status_code not in (200, 201):
         logging.warning(f"  Failed to update release {tag}: {resp.status_code}")
@@ -500,7 +505,7 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
                     continue
                 dl_url = download_url
                 dl_kwargs = {
-                    "params": {"access_token": source_token},
+                    "headers": gitee_headers(source_token),
                     "timeout": 300,
                     "stream": True,
                 }
@@ -555,7 +560,7 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
                     with open(tmp_path, "rb") as f:
                         up_resp = api_request(
                             "POST", upload_url,
-                            params={"access_token": target_token},
+                            headers=gitee_headers(target_token),
                             files={"file": (asset_name, f)},
                             max_retries=1,
                             timeout=300,
@@ -763,9 +768,9 @@ def sync_labels(source_platform, target_platform, source_owner, target_owner,
                         json=payload, max_retries=1,
                     )
                 else:
-                    payload["access_token"] = target_token
                     resp = api_request(
-                        "POST", url, json=payload, max_retries=1,
+                        "POST", url, headers=gitee_headers(target_token),
+                        json=payload, max_retries=1,
                     )
 
                 if resp.status_code in (200, 201):
@@ -809,9 +814,9 @@ def sync_labels(source_platform, target_platform, source_owner, target_owner,
                             json=payload, max_retries=1,
                         )
                     else:
-                        payload["access_token"] = target_token
                         resp = api_request(
-                            "PATCH", url, json=payload, max_retries=1,
+                            "PATCH", url, headers=gitee_headers(target_token),
+                            json=payload, max_retries=1,
                         )
 
                     if resp.status_code in (200, 201):
@@ -905,9 +910,9 @@ def sync_milestones(source_platform, target_platform, source_owner,
                         json=payload, max_retries=1,
                     )
                 else:
-                    payload["access_token"] = target_token
                     resp = api_request(
-                        "POST", url, json=payload, max_retries=1,
+                        "POST", url, headers=gitee_headers(target_token),
+                        json=payload, max_retries=1,
                     )
 
                 if resp.status_code in (200, 201):
@@ -947,9 +952,9 @@ def sync_milestones(source_platform, target_platform, source_owner,
                             json=payload, max_retries=1,
                         )
                     else:
-                        payload["access_token"] = target_token
                         resp = api_request(
-                            "PATCH", url, json=payload, max_retries=1,
+                            "PATCH", url, headers=gitee_headers(target_token),
+                            json=payload, max_retries=1,
                         )
 
                     if resp.status_code in (200, 201):
@@ -1068,9 +1073,9 @@ def sync_issues(source_platform, target_platform, source_owner, target_owner,
                     json=payload, max_retries=1,
                 )
             else:
-                payload["access_token"] = target_token
                 resp = api_request(
-                    "POST", url, json=payload, max_retries=1,
+                    "POST", url, headers=gitee_headers(target_token),
+                    json=payload, max_retries=1,
                 )
 
             if resp.status_code in (200, 201):
@@ -1134,9 +1139,9 @@ def _sync_issue_comments(source_platform, target_platform, source_owner,
                     json=payload, max_retries=1,
                 )
             else:
-                payload["access_token"] = target_token
                 api_request(
-                    "POST", url, json=payload, max_retries=1,
+                    "POST", url, headers=gitee_headers(target_token),
+                    json=payload, max_retries=1,
                 )
     except Exception as e:
         logging.warning(f"  Issue comments sync failed: {e}")
