@@ -465,7 +465,11 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
             continue
 
         # 跳过目标已存在的同名 asset
+        # 二级评审 Issue #9: 添加 debug 日志记录跳过的 asset
         if asset_name in tgt_asset_names:
+            logging.debug(
+                f"  Asset {asset_name} already exists on target, skipping"
+            )
             continue
 
         # 检查文件大小
