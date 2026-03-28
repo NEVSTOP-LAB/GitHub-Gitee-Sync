@@ -37,6 +37,7 @@ from lib.utils import (
     check_git_installed,
     get_log_collector,
     setup_logging,
+    validate_repo_name,
     write_action_outputs,
 )
 from lib.github_api import (
@@ -323,6 +324,17 @@ def sync_one_direction(source_platform, target_platform, source_owner,
     total = len(source_repos)
     for idx, repo in enumerate(source_repos, 1):
         repo_name = repo["name"]
+
+        # --- 安全: 验证仓库名 ---
+        # 对应: 安全评审 — 防止路径遍历和命令注入
+        if not validate_repo_name(repo_name):
+            logging.warning(
+                f"[{idx}/{total}] Skipping {repo_name}: "
+                f"invalid repository name (security check)"
+            )
+            skipped += 1
+            continue
+
         logging.info(f"[{idx}/{total}] Syncing {repo_name} ...")
 
         # --- Step A: 检查/创建目标仓库 ---
