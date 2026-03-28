@@ -181,11 +181,22 @@ class TestMirrorSync:
             return {}, p
 
         unlinked = []
+        opened_files = []
+
+        def track_open(path, mode):
+            opened_files.append(path)
+            # Return a mock file object that supports write and context manager
+            from io import BytesIO
+            return BytesIO()
+
         with patch("lib.sync_repo.subprocess.run",
                    side_effect=[clone_proc, push_all_proc, push_tags_proc]), \
              patch("lib.sync_repo.make_git_env",
                    side_effect=fake_make_git_env), \
              patch("lib.sync_repo.shutil.rmtree"), \
+             patch("lib.sync_repo.os.path.exists", return_value=True), \
+             patch("lib.sync_repo.os.path.getsize", return_value=100), \
+             patch("builtins.open", side_effect=track_open), \
              patch("lib.sync_repo.os.unlink", side_effect=unlinked.append), \
              patch("lib.sync_repo.tempfile.mkdtemp", return_value="/tmp/testdir"):
             mirror_sync(
@@ -196,6 +207,9 @@ class TestMirrorSync:
             )
         assert "/tmp/askpass_clone.sh" in unlinked
         assert "/tmp/askpass_push.sh" in unlinked
+        # Verify that files were opened for zero-overwriting
+        assert "/tmp/askpass_clone.sh" in opened_files
+        assert "/tmp/askpass_push.sh" in opened_files
 
     def test_temp_dir_always_cleaned_up(self):
         clone_proc = _make_process(returncode=1, stderr="fatal error")

@@ -34,6 +34,7 @@ from lib.utils import (
     github_headers,
     gitee_headers,
     get_log_collector,
+    validate_repo_name,
     write_action_outputs,
     check_git_installed,
 )
@@ -68,6 +69,68 @@ class TestMaskToken:
         assert "tok1" not in result
         assert "tok2" not in result
         assert result.count("***") == 2
+
+
+# ===========================================================================
+# validate_repo_name
+# ===========================================================================
+
+class TestValidateRepoName:
+    def test_accepts_valid_alphanumeric_name(self):
+        assert validate_repo_name("my-repo") is True
+        assert validate_repo_name("my_repo") is True
+        assert validate_repo_name("MyRepo123") is True
+
+    def test_accepts_dots_in_middle(self):
+        assert validate_repo_name("my.repo") is True
+        assert validate_repo_name("my-repo.backup") is True
+
+    def test_rejects_path_traversal(self):
+        assert validate_repo_name("../etc/passwd") is False
+        assert validate_repo_name("..") is False
+        assert validate_repo_name("foo/../bar") is False
+
+    def test_rejects_slashes(self):
+        assert validate_repo_name("foo/bar") is False
+        assert validate_repo_name("foo\\bar") is False
+        assert validate_repo_name("/etc/passwd") is False
+
+    def test_rejects_starting_with_dot(self):
+        assert validate_repo_name(".hidden") is False
+        assert validate_repo_name(".git") is False
+
+    def test_rejects_ending_with_dot(self):
+        assert validate_repo_name("repo.") is False
+        assert validate_repo_name("my-repo.") is False
+
+    def test_rejects_empty_string(self):
+        assert validate_repo_name("") is False
+        assert validate_repo_name(None) is False
+
+    def test_rejects_non_string(self):
+        assert validate_repo_name(123) is False
+        assert validate_repo_name([]) is False
+        assert validate_repo_name({}) is False
+
+    def test_rejects_too_long_name(self):
+        long_name = "a" * 101
+        assert validate_repo_name(long_name) is False
+
+    def test_accepts_100_char_name(self):
+        max_name = "a" * 100
+        assert validate_repo_name(max_name) is True
+
+    def test_rejects_special_chars(self):
+        assert validate_repo_name("my repo") is False  # space
+        assert validate_repo_name("my@repo") is False
+        assert validate_repo_name("my#repo") is False
+        assert validate_repo_name("my$repo") is False
+        assert validate_repo_name("repo!") is False
+
+    def test_accepts_common_valid_names(self):
+        assert validate_repo_name("GitHub-Gitee-Sync") is True
+        assert validate_repo_name("repo_name_123") is True
+        assert validate_repo_name("my-project-v2") is True
 
 
 # ===========================================================================
