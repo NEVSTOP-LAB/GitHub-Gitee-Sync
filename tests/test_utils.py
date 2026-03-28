@@ -413,6 +413,19 @@ class TestPaginatedGet:
             warning_msg = str(mock_warn.call_args)
             assert "404" in warning_msg
 
+    def test_warns_on_non_list_response(self):
+        """API 返回 dict (如 {"message": "Not Found"}) 时应记录警告"""
+        responses = [
+            self._make_resp({"message": "Not Found"}),
+        ]
+        with patch("lib.utils.api_request", side_effect=responses), \
+             patch("lib.utils.logging.warning") as mock_warn:
+            result = paginated_get("github", "token", "/repos/owner/repo/labels")
+        assert result == []
+        mock_warn.assert_called_once()
+        warning_msg = str(mock_warn.call_args)
+        assert "non-list" in warning_msg.lower()
+
     def test_gitee_adds_bearer_header(self):
         with patch("lib.utils.api_request",
                    return_value=self._make_resp([])) as mock_req:

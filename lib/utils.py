@@ -318,6 +318,8 @@ def paginated_get(platform, token, path, extra_params=None):
         if isinstance(data, list):
             items.extend(data)
         else:
+            # 二级评审 Issue #14: 非 list 响应时记录警告而非静默忽略
+            logging.warning("Paginated GET returned non-list: %r", data)
             break
         page += 1
     return items
