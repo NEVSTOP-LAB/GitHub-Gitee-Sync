@@ -113,9 +113,12 @@ class TestTokenMaskingFilter:
 
     def test_clears_args_after_masking(self):
         f = TokenMaskingFilter()
-        record = self._make_record("Value: %s", ("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij",))
+        token = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
+        record = self._make_record("Value: %s", (token,))
         f.filter(record)
         assert record.args == ()
+        assert token not in record.msg
+        assert "***" in record.msg
 
 
 # ===========================================================================
