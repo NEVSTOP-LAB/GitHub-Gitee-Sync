@@ -207,8 +207,8 @@ class TestSyncWiki:
                       "src_token", "tgt_token", "repo", dry_run=True)
         mock_run.assert_not_called()
 
-    def test_silent_skip_when_clone_fails(self):
-        """Wiki 不存在时（clone 失败）静默跳过"""
+    def test_warns_when_clone_fails(self):
+        """Wiki 不存在时（clone 失败）输出 warning 并跳过"""
         clone_proc = _make_process(returncode=128, stderr="not found")
         with patch("lib.sync_repo.subprocess.run",
                    return_value=clone_proc), \
@@ -216,10 +216,11 @@ class TestSyncWiki:
                    return_value=({}, "/tmp/fake")), \
              patch("lib.sync_repo.shutil.rmtree"), \
              patch("lib.sync_repo.os.unlink"), \
-             patch("lib.sync_repo.tempfile.mkdtemp", return_value="/tmp/wiki"):
-            # Should not raise
+             patch("lib.sync_repo.tempfile.mkdtemp", return_value="/tmp/wiki"), \
+             patch("lib.sync_repo.logging.warning") as mock_warn:
             sync_wiki("github", "gitee", "src_owner", "tgt_owner",
                       "src_token", "tgt_token", "repo")
+        assert any("Wiki not available" in str(c) for c in mock_warn.call_args_list)
 
     def test_builds_wiki_url_correctly(self):
         clone_proc = _make_process(returncode=0)

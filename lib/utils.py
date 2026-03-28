@@ -36,16 +36,44 @@ GITEE_API = "https://gitee.com/api/v5"
 # ===========================================================================
 
 
+class TokenMaskingFilter(logging.Filter):
+    """日志过滤器：自动拦截并脱敏日志消息中的 Token 模式。
+
+    作为最后一道防线，即使代码遗漏了手动调用 mask_token()，
+    也能防止 Token 泄漏到日志输出中。
+
+    对应: 二级评审 Issue #5 — "日志中 Token 可能遗漏脱敏"
+    """
+    TOKEN_PATTERNS = [
+        re.compile(r'ghp_[a-zA-Z0-9]{36}'),
+        re.compile(r'gho_[a-zA-Z0-9]{36}'),
+        re.compile(r'github_pat_[a-zA-Z0-9_]{82}'),
+        re.compile(r'https://[^@\s]+@'),
+        re.compile(r'access_token=[^&\s]+'),
+    ]
+
+    def filter(self, record):
+        message = record.getMessage()
+        for pattern in self.TOKEN_PATTERNS:
+            message = pattern.sub('***', message)
+        record.msg = message
+        record.args = ()
+        return True
+
+
 def setup_logging():
     """配置日志格式与级别。
 
     使用 [LEVEL] message 格式输出到 stdout，方便在 GitHub Action 日志中查看。
+    安装 TokenMaskingFilter 自动拦截日志中的 Token 信息。
     """
     logging.basicConfig(
         level=logging.INFO,
         format="[%(levelname)s] %(message)s",
         stream=sys.stdout,
     )
+    # 在根 logger 上安装 Token 脱敏过滤器
+    logging.getLogger().addFilter(TokenMaskingFilter())
 
 
 # ===========================================================================
@@ -225,13 +253,22 @@ def github_headers(token):
     """构建 GitHub API 标准请求头。
 
     对应: docs/调研/GitHub-API.md — "认证方式"
-    - Authorization: token <TOKEN>
+    - Authorization: Bearer <TOKEN> (GitHub 推荐格式)
     - Accept: application/vnd.github.v3+json
     """
     return {
-        "Authorization": f"token {token}",
+        "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github.v3+json",
     }
+
+
+def gitee_headers(token):
+    """构建 Gitee API 标准请求头。
+
+    使用 Bearer Token 认证方式（避免 Token 出现在 URL 查询参数中）。
+    对应: 二级评审 Issue #1 — "Gitee Token 暴露在 URL 查询参数中"
+    """
+    return {"Authorization": f"Bearer {token}"}
 
 
 def paginated_get(platform, token, path, extra_params=None):
@@ -262,8 +299,7 @@ def paginated_get(platform, token, path, extra_params=None):
             kwargs = {"headers": github_headers(token), "params": p}
         else:
             url = f"{GITEE_API}{path}"
-            p["access_token"] = token
-            kwargs = {"params": p}
+            kwargs = {"headers": gitee_headers(token), "params": p}
 
         resp = api_request("GET", url, max_retries=2, **kwargs)
 
@@ -282,6 +318,8 @@ def paginated_get(platform, token, path, extra_params=None):
         if isinstance(data, list):
             items.extend(data)
         else:
+            # 二级评审 Issue #14: 非 list 响应时记录警告而非静默忽略
+            logging.warning("Paginated GET returned non-list: %r", data)
             break
         page += 1
     return items

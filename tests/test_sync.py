@@ -78,6 +78,15 @@ class TestParseArgs:
         args = self._parse(["--sync-extra=releases,wiki,labels"])
         assert args.sync_extra == {"releases", "wiki", "labels"}
 
+    def test_sync_extra_invalid_values_warned_and_filtered(self):
+        """无效的 sync-extra 值应被过滤并记录警告"""
+        with patch("sync.logging.warning") as mock_warn:
+            args = self._parse(["--sync-extra=releases,release,invalid"])
+        assert args.sync_extra == {"releases"}
+        mock_warn.assert_called_once()
+        warning_msg = str(mock_warn.call_args)
+        assert "release" in warning_msg or "invalid" in warning_msg
+
     def test_empty_exclude_repos_is_empty_set(self):
         args = self._parse(["--exclude-repos="])
         assert args.exclude_repos == set()
@@ -327,3 +336,15 @@ class TestSyncAll:
             sync_all(self._make_args(dry_run=True))
         log_messages = [str(c) for c in mock_log.call_args_list]
         assert any("DRY-RUN" in msg for msg in log_messages)
+
+    def test_all_skipped_returns_0_with_warning(self):
+        """全部跳过时退出码为 0 但应输出警告"""
+        with patch("sync.sync_one_direction",
+                   return_value=(0, 0, 5, [])), \
+             patch("sync.write_action_outputs"), \
+             patch("sync.logging.warning") as mock_warn:
+            code = sync_all(self._make_args())
+        assert code == 0
+        mock_warn.assert_called_once()
+        warning_msg = str(mock_warn.call_args)
+        assert "skipped" in warning_msg.lower()

@@ -39,31 +39,31 @@ def _make_resp(data, status=200):
 
 class TestValidateGiteeToken:
     def test_valid_token_returns_login(self):
-        with patch("lib.gitee_api.requests.get",
+        with patch("lib.gitee_api.api_request",
                    return_value=_make_resp({"login": "giteeuser"})):
             user = validate_gitee_token("valid_token")
         assert user == "giteeuser"
 
     def test_invalid_token_raises_on_401(self):
-        with patch("lib.gitee_api.requests.get",
+        with patch("lib.gitee_api.api_request",
                    return_value=_make_resp({}, status=401)):
             with pytest.raises(Exception, match="401"):
                 validate_gitee_token("bad_token")
 
     def test_other_error_code_raises(self):
-        with patch("lib.gitee_api.requests.get",
+        with patch("lib.gitee_api.api_request",
                    return_value=_make_resp({}, status=500)):
             with pytest.raises(Exception, match="500"):
                 validate_gitee_token("token")
 
     def test_network_error_raises(self):
-        with patch("lib.gitee_api.requests.get",
+        with patch("lib.gitee_api.api_request",
                    side_effect=requests.ConnectionError("no network")):
             with pytest.raises(Exception, match="network error"):
                 validate_gitee_token("token")
 
     def test_unknown_login_defaults_to_unknown(self):
-        with patch("lib.gitee_api.requests.get",
+        with patch("lib.gitee_api.api_request",
                    return_value=_make_resp({})):
             user = validate_gitee_token("token")
         assert user == "unknown"
@@ -145,12 +145,12 @@ class TestGetGiteeRepos:
             with pytest.raises(Exception, match="403"):
                 get_gitee_repos("owner", "token", "user")
 
-    def test_access_token_in_request_params(self):
+    def test_bearer_header_in_request(self):
         with patch("lib.gitee_api.api_request",
                    return_value=_make_resp([])) as mock_req:
             get_gitee_repos("owner", "mytoken", "user")
             _, kwargs = mock_req.call_args
-            assert kwargs["params"]["access_token"] == "mytoken"
+            assert kwargs["headers"]["Authorization"] == "Bearer mytoken"
 
 
 # ===========================================================================
@@ -191,12 +191,12 @@ class TestCreateGiteeRepo:
             url = mock_req.call_args[0][1]
             assert "/orgs/myorg/repos" in url
 
-    def test_access_token_in_payload(self):
+    def test_bearer_header_in_request(self):
         with patch("lib.gitee_api.api_request",
                    return_value=_make_resp({}, status=201)) as mock_req:
             create_gitee_repo("owner", "mytoken", "repo", False, "", "user")
             _, kwargs = mock_req.call_args
-            assert kwargs["json"]["access_token"] == "mytoken"
+            assert kwargs["headers"]["Authorization"] == "Bearer mytoken"
 
 
 # ===========================================================================
@@ -244,11 +244,11 @@ class TestUpdateGiteeRepoMetadata:
                                             {"description": "new"})
         assert ok is False
 
-    def test_access_token_merged_into_payload(self):
+    def test_bearer_header_in_request(self):
         with patch("lib.gitee_api.api_request",
                    return_value=_make_resp({}, status=200)) as mock_req:
             update_gitee_repo_metadata("owner", "mytoken", "repo",
                                        {"description": "updated"})
             _, kwargs = mock_req.call_args
-            assert kwargs["json"]["access_token"] == "mytoken"
+            assert kwargs["headers"]["Authorization"] == "Bearer mytoken"
             assert kwargs["json"]["description"] == "updated"

@@ -12,6 +12,7 @@ tests/test_utils.py — lib/utils.py 单元测试
 - check_git_installed(): Git 环境检测
 """
 
+import logging
 import os
 import subprocess
 import tempfile
@@ -23,12 +24,14 @@ import requests
 from lib.utils import (
     GITHUB_API,
     GITEE_API,
+    TokenMaskingFilter,
     mask_token,
     build_clone_url,
     make_git_env,
     api_request,
     paginated_get,
     github_headers,
+    gitee_headers,
     write_action_outputs,
     check_git_installed,
 )
@@ -63,6 +66,59 @@ class TestMaskToken:
         assert "tok1" not in result
         assert "tok2" not in result
         assert result.count("***") == 2
+
+
+# ===========================================================================
+# TokenMaskingFilter
+# ===========================================================================
+
+class TestTokenMaskingFilter:
+    def _make_record(self, msg, args=()):
+        record = logging.LogRecord(
+            name="test", level=logging.INFO, pathname="test.py",
+            lineno=1, msg=msg, args=args, exc_info=None,
+        )
+        return record
+
+    def test_masks_ghp_token(self):
+        f = TokenMaskingFilter()
+        record = self._make_record("Token is ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij")
+        f.filter(record)
+        assert "ghp_" not in record.msg
+        assert "***" in record.msg
+
+    def test_masks_gho_token(self):
+        f = TokenMaskingFilter()
+        record = self._make_record("Token is gho_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij")
+        f.filter(record)
+        assert "gho_" not in record.msg
+
+    def test_masks_https_token_url(self):
+        f = TokenMaskingFilter()
+        record = self._make_record("URL: https://mytoken@github.com/repo.git")
+        f.filter(record)
+        assert "mytoken" not in record.msg
+
+    def test_masks_access_token_param(self):
+        f = TokenMaskingFilter()
+        record = self._make_record("URL: https://api.gitee.com?access_token=secret123")
+        f.filter(record)
+        assert "secret123" not in record.msg
+
+    def test_passes_safe_messages(self):
+        f = TokenMaskingFilter()
+        record = self._make_record("Normal log message without tokens")
+        f.filter(record)
+        assert record.msg == "Normal log message without tokens"
+
+    def test_clears_args_after_masking(self):
+        f = TokenMaskingFilter()
+        token = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
+        record = self._make_record("Value: %s", (token,))
+        f.filter(record)
+        assert record.args == ()
+        assert token not in record.msg
+        assert "***" in record.msg
 
 
 # ===========================================================================
@@ -166,7 +222,7 @@ class TestMakeGitEnv:
 class TestGithubHeaders:
     def test_contains_authorization(self):
         headers = github_headers("mytoken")
-        assert headers["Authorization"] == "token mytoken"
+        assert headers["Authorization"] == "Bearer mytoken"
 
     def test_contains_accept(self):
         headers = github_headers("mytoken")
@@ -360,12 +416,25 @@ class TestPaginatedGet:
             warning_msg = str(mock_warn.call_args)
             assert "404" in warning_msg
 
-    def test_gitee_adds_access_token_param(self):
+    def test_warns_on_non_list_response(self):
+        """API 返回 dict (如 {"message": "Not Found"}) 时应记录警告"""
+        responses = [
+            self._make_resp({"message": "Not Found"}),
+        ]
+        with patch("lib.utils.api_request", side_effect=responses), \
+             patch("lib.utils.logging.warning") as mock_warn:
+            result = paginated_get("github", "token", "/repos/owner/repo/labels")
+        assert result == []
+        mock_warn.assert_called_once()
+        warning_msg = str(mock_warn.call_args)
+        assert "non-list" in warning_msg.lower()
+
+    def test_gitee_adds_bearer_header(self):
         with patch("lib.utils.api_request",
                    return_value=self._make_resp([])) as mock_req:
             paginated_get("gitee", "mytoken", "/repos/owner/repo/labels")
             _, kwargs = mock_req.call_args
-            assert kwargs.get("params", {}).get("access_token") == "mytoken"
+            assert kwargs.get("headers", {}).get("Authorization") == "Bearer mytoken"
 
     def test_github_adds_auth_header(self):
         with patch("lib.utils.api_request",

@@ -26,8 +26,7 @@ REST API 端点汇总:
 └──────────────────────────────────────────────────────────────┘
 
 认证方式:
-  Query: ?access_token=TOKEN
-  Header: Authorization: Bearer TOKEN (推荐)
+  Header: Authorization: Bearer TOKEN (推荐，避免 Token 出现在 URL 中)
   所需权限: projects (仓库管理), user_info (基本信息)
 
 分页:
@@ -45,7 +44,7 @@ import logging
 
 import requests
 
-from .utils import GITEE_API, api_request
+from .utils import GITEE_API, api_request, gitee_headers
 
 
 # ===========================================================================
@@ -57,6 +56,7 @@ def validate_gitee_token(token):
     """验证 Gitee Token 是否有效。
 
     调用 GET /api/v5/user 接口检测 Token 认证状态。
+    复用 api_request 统一请求封装，获得重试、超时、日志脱敏能力。
     对应需求: docs/计划/错误处理设计.md — "认证错误 → 立即退出，提供清晰指引"
 
     Args:
@@ -70,10 +70,10 @@ def validate_gitee_token(token):
     """
     logging.info("Validating Gitee token ...")
     try:
-        resp = requests.get(
-            f"{GITEE_API}/user",
-            params={"access_token": token},
-            timeout=30,
+        resp = api_request(
+            "GET", f"{GITEE_API}/user",
+            headers=gitee_headers(token),
+            max_retries=2,
         )
         if resp.status_code == 401:
             raise Exception(
@@ -135,7 +135,6 @@ def get_gitee_repos(owner, token, account_type, include_private=True):
     # --- 分页遍历 ---
     while True:
         params = {
-            "access_token": token,
             "per_page": 100,
             "page": page,
         }
@@ -143,7 +142,7 @@ def get_gitee_repos(owner, token, account_type, include_private=True):
             # type=owner: 仅返回自己拥有的仓库
             params["type"] = "owner"
 
-        resp = api_request("GET", url, params=params)
+        resp = api_request("GET", url, headers=gitee_headers(token), params=params)
         if resp.status_code != 200:
             raise Exception(
                 f"Failed to fetch Gitee repos: {resp.status_code} {resp.text}"
@@ -222,7 +221,6 @@ def create_gitee_repo(owner, token, repo_name, private, description, account_typ
         url = f"{GITEE_API}/user/repos"
 
     payload = {
-        "access_token": token,
         "name": repo_name,
         # Gitee API 仓库描述限制 200 字符
         "description": description[:200] if description else "",
@@ -231,7 +229,8 @@ def create_gitee_repo(owner, token, repo_name, private, description, account_typ
         "auto_init": False,
     }
 
-    resp = api_request("POST", url, json=payload, max_retries=1)
+    resp = api_request("POST", url, headers=gitee_headers(token),
+                       json=payload, max_retries=1)
 
     if resp.status_code in (200, 201):
         logging.info(f"  Created Gitee repo: {repo_name}")
@@ -269,7 +268,7 @@ def get_gitee_repo_details(owner, token, repo_name):
     """
     url = f"{GITEE_API}/repos/{owner}/{repo_name}"
     resp = api_request(
-        "GET", url, params={"access_token": token}, max_retries=2
+        "GET", url, headers=gitee_headers(token), max_retries=2
     )
 
     if resp.status_code != 200:
@@ -300,9 +299,10 @@ def update_gitee_repo_metadata(owner, token, repo_name, metadata):
         True 成功, False 失败。
     """
     url = f"{GITEE_API}/repos/{owner}/{repo_name}"
-    payload = {"access_token": token}
+    payload = {}
     payload.update(metadata)
-    resp = api_request("PATCH", url, json=payload, max_retries=1)
+    resp = api_request("PATCH", url, headers=gitee_headers(token),
+                       json=payload, max_retries=1)
 
     if resp.status_code in (200, 201):
         return True

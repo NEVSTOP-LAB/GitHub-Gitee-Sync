@@ -32,6 +32,7 @@ from .utils import (
     GITEE_API,
     api_request,
     build_clone_url,
+    gitee_headers,
     github_headers,
     make_git_env,
     mask_token,
@@ -289,7 +290,7 @@ def sync_releases(source_platform, target_platform, source_owner, target_owner,
 
     Release Assets 同步:
     - GitHub: 通过 asset.url + Accept: application/octet-stream 下载（支持私有仓库）
-    - Gitee: 通过 browser_download_url + access_token 下载
+    - Gitee: 通过 browser_download_url + Bearer header 下载
     - 上传: GitHub 使用 uploads.github.com; Gitee 使用 attach_files 端点
     - 文件流式下载到临时文件，避免大文件导致内存溢出
     - 跳过超过 MAX_ASSET_SIZE 的文件
@@ -359,8 +360,10 @@ def sync_releases(source_platform, target_platform, source_owner, target_owner,
                     json=payload, max_retries=1,
                 )
             else:
-                payload["access_token"] = target_token
-                resp = api_request("POST", url, json=payload, max_retries=1)
+                resp = api_request(
+                    "POST", url, headers=gitee_headers(target_token),
+                    json=payload, max_retries=1,
+                )
 
             if resp.status_code in (200, 201):
                 created += 1
@@ -423,9 +426,11 @@ def _update_existing_release(target_platform, target_owner, target_token,
             json=payload, max_retries=1,
         )
     else:
-        payload["access_token"] = target_token
         payload["tag_name"] = tag
-        resp = api_request("PATCH", url, json=payload, max_retries=1)
+        resp = api_request(
+            "PATCH", url, headers=gitee_headers(target_token),
+            json=payload, max_retries=1,
+        )
 
     if resp.status_code not in (200, 201):
         logging.warning(f"  Failed to update release {tag}: {resp.status_code}")
@@ -460,7 +465,11 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
             continue
 
         # 跳过目标已存在的同名 asset
+        # 二级评审 Issue #9: 添加 debug 日志记录跳过的 asset
         if asset_name in tgt_asset_names:
+            logging.debug(
+                f"  Asset {asset_name} already exists on target, skipping"
+            )
             continue
 
         # 检查文件大小
@@ -488,7 +497,7 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
                 dl_url = asset_api_url
                 dl_kwargs = {
                     "headers": {
-                        "Authorization": f"token {source_token}",
+                        "Authorization": f"Bearer {source_token}",
                         "Accept": "application/octet-stream",
                     },
                     "timeout": 300,
@@ -500,7 +509,7 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
                     continue
                 dl_url = download_url
                 dl_kwargs = {
-                    "params": {"access_token": source_token},
+                    "headers": gitee_headers(source_token),
                     "timeout": 300,
                     "stream": True,
                 }
@@ -539,7 +548,7 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
                         up_resp = api_request(
                             "POST", upload_url,
                             headers={
-                                "Authorization": f"token {target_token}",
+                                "Authorization": f"Bearer {target_token}",
                                 "Content-Type": content_type,
                             },
                             data=f,
@@ -555,7 +564,7 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
                     with open(tmp_path, "rb") as f:
                         up_resp = api_request(
                             "POST", upload_url,
-                            params={"access_token": target_token},
+                            headers=gitee_headers(target_token),
                             files={"file": (asset_name, f)},
                             max_retries=1,
                             timeout=300,
@@ -650,9 +659,11 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
                 env=src_env,
             )
             if result.returncode != 0:
-                # Wiki 不存在 — 静默跳过
-                logging.debug(
-                    f"  Wiki not available for {repo_name}, skipping"
+                # Wiki clone 失败 — 可能源仓库未启用 Wiki
+                # 二级评审 Issue #8: 从 debug 改为 warning，让用户知道 Wiki 未被同步
+                logging.warning(
+                    f"  Wiki not available for {repo_name}, skipping "
+                    f"(ensure Wiki is enabled on source repo)"
                 )
                 return
 
@@ -763,9 +774,9 @@ def sync_labels(source_platform, target_platform, source_owner, target_owner,
                         json=payload, max_retries=1,
                     )
                 else:
-                    payload["access_token"] = target_token
                     resp = api_request(
-                        "POST", url, json=payload, max_retries=1,
+                        "POST", url, headers=gitee_headers(target_token),
+                        json=payload, max_retries=1,
                     )
 
                 if resp.status_code in (200, 201):
@@ -809,9 +820,9 @@ def sync_labels(source_platform, target_platform, source_owner, target_owner,
                             json=payload, max_retries=1,
                         )
                     else:
-                        payload["access_token"] = target_token
                         resp = api_request(
-                            "PATCH", url, json=payload, max_retries=1,
+                            "PATCH", url, headers=gitee_headers(target_token),
+                            json=payload, max_retries=1,
                         )
 
                     if resp.status_code in (200, 201):
@@ -905,9 +916,9 @@ def sync_milestones(source_platform, target_platform, source_owner,
                         json=payload, max_retries=1,
                     )
                 else:
-                    payload["access_token"] = target_token
                     resp = api_request(
-                        "POST", url, json=payload, max_retries=1,
+                        "POST", url, headers=gitee_headers(target_token),
+                        json=payload, max_retries=1,
                     )
 
                 if resp.status_code in (200, 201):
@@ -947,9 +958,9 @@ def sync_milestones(source_platform, target_platform, source_owner,
                             json=payload, max_retries=1,
                         )
                     else:
-                        payload["access_token"] = target_token
                         resp = api_request(
-                            "PATCH", url, json=payload, max_retries=1,
+                            "PATCH", url, headers=gitee_headers(target_token),
+                            json=payload, max_retries=1,
                         )
 
                     if resp.status_code in (200, 201):
@@ -1068,9 +1079,9 @@ def sync_issues(source_platform, target_platform, source_owner, target_owner,
                     json=payload, max_retries=1,
                 )
             else:
-                payload["access_token"] = target_token
                 resp = api_request(
-                    "POST", url, json=payload, max_retries=1,
+                    "POST", url, headers=gitee_headers(target_token),
+                    json=payload, max_retries=1,
                 )
 
             if resp.status_code in (200, 201):
@@ -1134,9 +1145,9 @@ def _sync_issue_comments(source_platform, target_platform, source_owner,
                     json=payload, max_retries=1,
                 )
             else:
-                payload["access_token"] = target_token
                 api_request(
-                    "POST", url, json=payload, max_retries=1,
+                    "POST", url, headers=gitee_headers(target_token),
+                    json=payload, max_retries=1,
                 )
     except Exception as e:
         logging.warning(f"  Issue comments sync failed: {e}")

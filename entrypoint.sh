@@ -14,6 +14,17 @@ set -e
 export GITHUB_OWNER="${INPUT_GITHUB_OWNER:-$GITHUB_OWNER}"
 export GITHUB_TOKEN="${INPUT_GITHUB_TOKEN:-$GITHUB_TOKEN}"
 
+# Issue #15: Warn if GITHUB_TOKEN appears to be the built-in Actions token (ghs_ prefix).
+# The built-in token only has access to the current repository and will cause permission
+# errors when trying to sync other repos. Users should provide a PAT (ghp_) instead.
+case "$GITHUB_TOKEN" in
+  ghs_*)
+    echo "[WARNING] GITHUB_TOKEN appears to be the GitHub Actions built-in token (ghs_ prefix)."
+    echo "  This token only has permissions for the current repository."
+    echo "  Please provide a Personal Access Token (PAT) with 'repo' scope for cross-repo sync."
+    ;;
+esac
+
 # Gitee credentials
 export GITEE_OWNER="${INPUT_GITEE_OWNER:-$GITEE_OWNER}"
 export GITEE_TOKEN="${INPUT_GITEE_TOKEN:-$GITEE_TOKEN}"
