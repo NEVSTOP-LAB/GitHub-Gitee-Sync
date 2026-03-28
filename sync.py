@@ -332,12 +332,15 @@ def sync_one_direction(source_platform, target_platform, source_owner,
         # --- Step B: Git Mirror 同步（核心步骤）---
         # 对应: docs/计划/流程图.md — "git clone --mirror → git push --mirror"
         source_url = build_clone_url(
-            source_platform, source_owner, source_token, repo_name
+            source_platform, source_owner, repo_name
         )
         target_url = build_clone_url(
-            target_platform, target_owner, target_token, repo_name
+            target_platform, target_owner, repo_name
         )
-        result = mirror_sync(source_url, target_url, repo_name, dry_run)
+        result = mirror_sync(
+            source_url, target_url, repo_name,
+            source_token, target_token, dry_run,
+        )
 
         if result == "failed":
             failed += 1

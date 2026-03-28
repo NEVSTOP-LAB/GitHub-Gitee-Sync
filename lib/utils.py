@@ -18,8 +18,8 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
-from urllib.parse import quote
 
 import requests
 
@@ -61,27 +61,63 @@ def mask_token(text):
     return re.sub(r'https://[^@]+@', 'https://***@', str(text))
 
 
-def build_clone_url(platform, owner, token, repo_name):
-    """构建带 Token 认证的 Git clone URL。
+def build_clone_url(platform, owner, repo_name):
+    """构建无凭据的 Git clone URL。
 
-    Token 会经过 URL 编码，确保包含特殊字符（如 +, /, @）时不会破坏 URL。
+    出于安全考虑，不在 URL 中内联 Token — Token 通过 GIT_ASKPASS 传递。
+    这样即使 git 输出错误信息，也不会泄露 Token。
 
     Args:
         platform: 平台标识 ("github" 或 "gitee")。
         owner: 仓库所有者。
-        token: 个人访问令牌。
         repo_name: 仓库名。
 
     Returns:
-        形如 https://<encoded_token>@github.com/<owner>/<repo>.git 的 URL。
+        形如 https://github.com/<owner>/<repo>.git 的 URL。
 
-    对应需求: docs/调研/Git-Mirror-同步机制.md — "HTTPS + Token in URL"
+    对应需求: docs/调研/Git-Mirror-同步机制.md — "HTTPS + Token"
+    安全改进: Token 不再出现在 URL 中，由 GIT_ASKPASS 提供。
     """
-    encoded_token = quote(token, safe="")
     if platform == "github":
-        return f"https://{encoded_token}@github.com/{owner}/{repo_name}.git"
+        return f"https://github.com/{owner}/{repo_name}.git"
     else:
-        return f"https://{encoded_token}@gitee.com/{owner}/{repo_name}.git"
+        return f"https://gitee.com/{owner}/{repo_name}.git"
+
+
+def make_git_env(token):
+    """构建 git 子进程的认证环境变量，通过 GIT_ASKPASS 安全传递 Token。
+
+    工作原理:
+    - 创建临时 shell 脚本，内容为 echo <token>
+    - 设置 GIT_ASKPASS 指向该脚本
+    - git 需要密码时自动调用该脚本获取 Token
+    - 调用方负责在 git 操作完成后清理临时脚本（路径保存在返回的 env 中）
+
+    安全优势:
+    - Token 不出现在 URL 中（不会泄露到进程列表/git 错误消息）
+    - 脚本文件仅当前用户可读/可执行（权限 0o700）
+    - 调用方用完后立即删除脚本文件
+
+    Args:
+        token: 个人访问令牌。
+
+    Returns:
+        (env_dict, askpass_path) 元组:
+        - env_dict: 可传给 subprocess.run(env=...) 的环境变量字典
+        - askpass_path: 临时 askpass 脚本路径，调用方负责 os.unlink() 清理
+
+    对应: PR review — "使用 GIT_ASKPASS 而非 URL 内联 Token，减少 Token 暴露"
+    """
+    # 创建临时 askpass 脚本: git 需要密码时执行该脚本，stdout 作为密码
+    fd, askpass_path = tempfile.mkstemp(prefix="git_askpass_", suffix=".sh")
+    with os.fdopen(fd, "w") as f:
+        f.write(f"#!/bin/sh\necho '{token}'\n")
+    os.chmod(askpass_path, 0o700)
+
+    env = os.environ.copy()
+    env["GIT_ASKPASS"] = askpass_path
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env, askpass_path
 
 
 # ===========================================================================
@@ -122,12 +158,21 @@ def api_request(method, url, max_retries=3, backoff_base=2, **kwargs):
             # 对应: docs/计划/错误处理设计.md — "Rate Limit 处理"
             # GitHub: X-RateLimit-Remaining, X-RateLimit-Reset
             # Gitee: 类似机制，但文档不完善，仍检测相同 Header
-            remaining = int(resp.headers.get("X-RateLimit-Remaining", 999))
+            # 注意: Header 可能缺失、为空或非数字（代理/CDN 场景），需防御性解析
+            raw_remaining = resp.headers.get("X-RateLimit-Remaining", None)
+            try:
+                remaining = int(raw_remaining) if raw_remaining is not None else 999
+            except (TypeError, ValueError):
+                remaining = 999
             if 0 < remaining < 100:
                 # 接近限额时主动降速
                 time.sleep(1)
             if resp.status_code in (403, 429) and remaining == 0:
-                reset_time = int(resp.headers.get("X-RateLimit-Reset", 0))
+                raw_reset = resp.headers.get("X-RateLimit-Reset", None)
+                try:
+                    reset_time = int(raw_reset) if raw_reset is not None else 0
+                except (TypeError, ValueError):
+                    reset_time = 0
                 wait = max(0, reset_time - time.time())
                 if wait > 900:
                     raise Exception(

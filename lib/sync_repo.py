@@ -33,6 +33,7 @@ from .utils import (
     api_request,
     build_clone_url,
     github_headers,
+    make_git_env,
     mask_token,
     paginated_get,
 )
@@ -63,7 +64,8 @@ SYNC_MARKER = "<!-- synced-from: {url} -->"
 # ===========================================================================
 
 
-def mirror_sync(source_url, target_url, repo_name, dry_run=False):
+def mirror_sync(source_url, target_url, repo_name,
+                source_token, target_token, dry_run=False):
     """执行 git clone --mirror + git push --mirror 完成代码同步。
 
     这是仓库同步的核心步骤。使用 mirror 方式可以同步所有分支、标签和引用。
@@ -71,7 +73,12 @@ def mirror_sync(source_url, target_url, repo_name, dry_run=False):
     流程:
     1. git clone --mirror <source_url> <temp_dir>  — 完整镜像克隆
     2. git push --mirror <target_url>               — 镜像推送到目标
-    3. 清理临时目录
+    3. 清理临时目录和 askpass 脚本
+
+    认证方式:
+    - 使用 GIT_ASKPASS 临时脚本传递 Token（不在 URL 中内联 Token）
+    - clone 使用 source_token，push 使用 target_token
+    - 对应: PR review — "使用 GIT_ASKPASS 减少 Token 暴露"
 
     对应需求:
     - docs/调研/Git-Mirror-同步机制.md — "Strategy A: 每次全新 clone + push"
@@ -79,9 +86,11 @@ def mirror_sync(source_url, target_url, repo_name, dry_run=False):
     - docs/计划/错误处理设计.md — "git clone/push 超时处理, 空仓库检测"
 
     Args:
-        source_url: 源仓库 URL（已嵌入 Token）。
-        target_url: 目标仓库 URL（已嵌入 Token）。
+        source_url: 源仓库 URL（无凭据的 HTTPS URL）。
+        target_url: 目标仓库 URL（无凭据的 HTTPS URL）。
         repo_name: 仓库名（用于日志）。
+        source_token: 源平台 Token（用于 clone 认证）。
+        target_token: 目标平台 Token（用于 push 认证）。
         dry_run: 如果为 True，跳过实际 git 操作。
 
     Returns:
@@ -94,14 +103,18 @@ def mirror_sync(source_url, target_url, repo_name, dry_run=False):
         return "success"
 
     temp_dir = tempfile.mkdtemp(prefix=f"sync_{repo_name}_")
+    askpass_paths = []
     try:
-        # --- Step 1: git clone --mirror ---
+        # --- Step 1: git clone --mirror (使用 source_token 认证) ---
         logging.info(f"  Cloning from source ...")
+        src_env, src_askpass = make_git_env(source_token)
+        askpass_paths.append(src_askpass)
         result = subprocess.run(
             ["git", "clone", "--mirror", source_url, temp_dir],
             capture_output=True,
             text=True,
             timeout=GIT_TIMEOUT,
+            env=src_env,
         )
 
         if result.returncode != 0:
@@ -124,14 +137,17 @@ def mirror_sync(source_url, target_url, repo_name, dry_run=False):
             )
             return "empty"
 
-        # --- Step 2: git push --mirror ---
+        # --- Step 2: git push --mirror (使用 target_token 认证) ---
         logging.info(f"  Pushing to target ...")
+        tgt_env, tgt_askpass = make_git_env(target_token)
+        askpass_paths.append(tgt_askpass)
         result = subprocess.run(
             ["git", "push", "--mirror", target_url],
             cwd=temp_dir,
             capture_output=True,
             text=True,
             timeout=GIT_TIMEOUT,
+            env=tgt_env,
         )
 
         if result.returncode != 0:
@@ -150,8 +166,13 @@ def mirror_sync(source_url, target_url, repo_name, dry_run=False):
         logging.error(f"  Mirror sync error: {mask_token(str(e))}")
         return "failed"
     finally:
-        # --- Step 3: 清理临时目录 ---
+        # --- Step 3: 清理临时目录和 askpass 脚本 ---
         shutil.rmtree(temp_dir, ignore_errors=True)
+        for p in askpass_paths:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
 
 
 # ===========================================================================
@@ -457,46 +478,53 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
 
         try:
             # --- 下载 asset (流式写入临时文件) ---
-            tmp_file = tempfile.NamedTemporaryFile(delete=False, prefix="asset_")
-            try:
-                if source_platform == "github":
-                    # GitHub: 使用 asset.url + Accept header 认证下载
-                    # 这样私有仓库的 assets 也能正确下载
-                    asset_api_url = asset.get("url", "")
-                    if not asset_api_url:
-                        continue
-                    dl_resp = requests.get(
-                        asset_api_url,
-                        headers={
-                            "Authorization": f"token {source_token}",
-                            "Accept": "application/octet-stream",
-                        },
-                        timeout=300,
-                        stream=True,
-                    )
-                else:
-                    download_url = asset.get("browser_download_url", "")
-                    if not download_url:
-                        continue
-                    dl_resp = requests.get(
-                        download_url,
-                        params={"access_token": source_token},
-                        timeout=300,
-                        stream=True,
-                    )
-
-                if dl_resp.status_code != 200:
-                    logging.warning(
-                        f"  Failed to download asset {asset_name}: "
-                        f"HTTP {dl_resp.status_code}"
-                    )
+            # 确定下载 URL 和认证参数
+            if source_platform == "github":
+                # GitHub: 使用 asset.url + Accept header 认证下载
+                # 这样私有仓库的 assets 也能正确下载
+                asset_api_url = asset.get("url", "")
+                if not asset_api_url:
                     continue
+                dl_url = asset_api_url
+                dl_kwargs = {
+                    "headers": {
+                        "Authorization": f"token {source_token}",
+                        "Accept": "application/octet-stream",
+                    },
+                    "timeout": 300,
+                    "stream": True,
+                }
+            else:
+                download_url = asset.get("browser_download_url", "")
+                if not download_url:
+                    continue
+                dl_url = download_url
+                dl_kwargs = {
+                    "params": {"access_token": source_token},
+                    "timeout": 300,
+                    "stream": True,
+                }
 
-                # 流式写入临时文件
-                for chunk in dl_resp.iter_content(chunk_size=8192):
-                    if chunk:
-                        tmp_file.write(chunk)
-                tmp_file.close()
+            # 创建临时文件用于流式写入
+            tmp_path = None
+            fd, tmp_path = tempfile.mkstemp(prefix="asset_")
+            try:
+                # 使用 with 确保 response 在所有路径（包括 continue）上正确关闭
+                with requests.get(dl_url, **dl_kwargs) as dl_resp:
+                    if dl_resp.status_code != 200:
+                        logging.warning(
+                            f"  Failed to download asset {asset_name}: "
+                            f"HTTP {dl_resp.status_code}"
+                        )
+                        continue
+
+                    # 流式写入临时文件（使用 os.fdopen 确保 fd 被正确关闭）
+                    with os.fdopen(fd, "wb") as tmp_file:
+                        for chunk in dl_resp.iter_content(chunk_size=8192):
+                            if chunk:
+                                tmp_file.write(chunk)
+                    # fd 已被 os.fdopen 接管并关闭，标记为 None 防止重复关闭
+                    fd = None
 
                 # --- 上传 asset ---
                 content_type = asset.get(
@@ -507,7 +535,7 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
                     # 移除 URL 模板部分: {?name,label}
                     upload_url = upload_url.split("{")[0]
                     upload_url = f"{upload_url}?name={quote(asset_name)}"
-                    with open(tmp_file.name, "rb") as f:
+                    with open(tmp_path, "rb") as f:
                         up_resp = api_request(
                             "POST", upload_url,
                             headers={
@@ -524,7 +552,7 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
                         f"/repos/{target_owner}/{repo_name}/releases/"
                         f"{tgt_release_id}/attach_files",
                     )
-                    with open(tmp_file.name, "rb") as f:
+                    with open(tmp_path, "rb") as f:
                         up_resp = api_request(
                             "POST", upload_url,
                             params={"access_token": target_token},
@@ -541,11 +569,18 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
                         f"{up_resp.status_code}"
                     )
             finally:
+                # 确保 fd 被关闭（如果尚未被 os.fdopen 接管）
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
                 # 清理临时文件
-                try:
-                    os.unlink(tmp_file.name)
-                except OSError:
-                    pass
+                if tmp_path:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
 
         except Exception as e:
             logging.warning(f"  Asset sync failed for {asset_name}: {e}")
@@ -566,6 +601,8 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
     前提条件: 目标平台已启用 Wiki（至少有一个页面或已启用 Wiki 功能）。
     源 Wiki 不存在时静默跳过（clone 会失败，但不视为错误）。
 
+    认证方式: 使用 GIT_ASKPASS 临时脚本（不在 URL 中内联 Token）。
+
     对应需求:
     - docs/调研/仓库附属信息同步调研.md — "Wiki Sync: git clone --mirror .wiki.git"
     - docs/计划/流程图.md — Step D "同步 Wiki"
@@ -577,38 +614,40 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
         logging.info(f"  [DRY-RUN] Would sync wiki for {repo_name}")
         return
 
+    askpass_paths = []
     try:
-        # 构建 .wiki.git URL
-        encoded_src_token = quote(source_token, safe="")
-        encoded_tgt_token = quote(target_token, safe="")
-
+        # 构建 .wiki.git URL（无凭据）
         if source_platform == "github":
             source_url = (
-                f"https://{encoded_src_token}@github.com/"
+                f"https://github.com/"
                 f"{source_owner}/{repo_name}.wiki.git"
             )
         else:
             source_url = (
-                f"https://{encoded_src_token}@gitee.com/"
+                f"https://gitee.com/"
                 f"{source_owner}/{repo_name}.wiki.git"
             )
 
         if target_platform == "github":
             target_url = (
-                f"https://{encoded_tgt_token}@github.com/"
+                f"https://github.com/"
                 f"{target_owner}/{repo_name}.wiki.git"
             )
         else:
             target_url = (
-                f"https://{encoded_tgt_token}@gitee.com/"
+                f"https://gitee.com/"
                 f"{target_owner}/{repo_name}.wiki.git"
             )
 
         temp_dir = tempfile.mkdtemp(prefix=f"wiki_{repo_name}_")
         try:
+            # Clone wiki 使用 source_token 认证
+            src_env, src_askpass = make_git_env(source_token)
+            askpass_paths.append(src_askpass)
             result = subprocess.run(
                 ["git", "clone", "--mirror", source_url, temp_dir],
                 capture_output=True, text=True, timeout=GIT_TIMEOUT,
+                env=src_env,
             )
             if result.returncode != 0:
                 # Wiki 不存在 — 静默跳过
@@ -617,10 +656,14 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
                 )
                 return
 
+            # Push wiki 使用 target_token 认证
+            tgt_env, tgt_askpass = make_git_env(target_token)
+            askpass_paths.append(tgt_askpass)
             result = subprocess.run(
                 ["git", "push", "--mirror", target_url],
                 cwd=temp_dir,
                 capture_output=True, text=True, timeout=GIT_TIMEOUT,
+                env=tgt_env,
             )
             if result.returncode != 0:
                 logging.warning(
@@ -635,6 +678,13 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
         logging.warning(f"  Wiki sync timed out")
     except Exception as e:
         logging.warning(f"  Wiki sync failed: {mask_token(str(e))}")
+    finally:
+        # 清理 askpass 脚本
+        for p in askpass_paths:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
 
 
 # ===========================================================================
