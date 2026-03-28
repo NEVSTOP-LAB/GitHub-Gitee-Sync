@@ -19,10 +19,13 @@ lib/sync_repo.py — 单仓库同步模块
 """
 
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
 from urllib.parse import quote
+
+import requests
 
 from .utils import (
     GITHUB_API,
@@ -417,8 +420,6 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
 
     对应: PR review — "使用 asset.url + Accept 认证下载, 流式传输"
     """
-    import os
-    import tempfile as tf
 
     assets = src_release.get("assets", [])
     if not assets:
@@ -456,7 +457,7 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
 
         try:
             # --- 下载 asset (流式写入临时文件) ---
-            tmp_file = tf.NamedTemporaryFile(delete=False, prefix=f"asset_")
+            tmp_file = tempfile.NamedTemporaryFile(delete=False, prefix="asset_")
             try:
                 if source_platform == "github":
                     # GitHub: 使用 asset.url + Accept header 认证下载
@@ -464,8 +465,7 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
                     asset_api_url = asset.get("url", "")
                     if not asset_api_url:
                         continue
-                    import requests as req
-                    dl_resp = req.get(
+                    dl_resp = requests.get(
                         asset_api_url,
                         headers={
                             "Authorization": f"token {source_token}",
@@ -478,8 +478,7 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
                     download_url = asset.get("browser_download_url", "")
                     if not download_url:
                         continue
-                    import requests as req
-                    dl_resp = req.get(
+                    dl_resp = requests.get(
                         download_url,
                         params={"access_token": source_token},
                         timeout=300,
