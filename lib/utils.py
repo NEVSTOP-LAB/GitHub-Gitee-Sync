@@ -13,6 +13,7 @@ lib/utils.py — 通用工具模块
 - docs/计划/Python-脚本设计.md — api_request, mask_token, setup_logging
 """
 
+import base64
 import logging
 import os
 import re
@@ -109,9 +110,14 @@ def make_git_env(token):
     对应: PR review — "使用 GIT_ASKPASS 而非 URL 内联 Token，减少 Token 暴露"
     """
     # 创建临时 askpass 脚本: git 需要密码时执行该脚本，stdout 作为密码
+    # 使用 base64 编码 token 避免 shell 注入（token 中可能包含单引号等特殊字符）
+    encoded = base64.b64encode(token.encode()).decode()
     fd, askpass_path = tempfile.mkstemp(prefix="git_askpass_", suffix=".sh")
     with os.fdopen(fd, "w") as f:
-        f.write(f"#!/bin/sh\necho '{token}'\n")
+        f.write(
+            "#!/bin/sh\n"
+            f"echo \"$(echo '{encoded}' | base64 -d)\"\n"
+        )
     os.chmod(askpass_path, 0o700)
 
     env = os.environ.copy()
