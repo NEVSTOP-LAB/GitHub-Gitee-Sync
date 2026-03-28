@@ -7,7 +7,7 @@ inputs:
     description: 'GitHub username or organization name'
     required: true
   github-token:
-    description: 'GitHub Personal Access Token (needs repo scope)'
+    description: 'GitHub Personal Access Token (needs repo scope; also needs read:org scope for organization repos)'
     required: true
   gitee-owner:
     description: 'Gitee username or organization name'
@@ -16,7 +16,7 @@ inputs:
     description: 'Gitee Personal Access Token (needs projects scope)'
     required: true
   account-type:
-    description: 'Account type: user or org'
+    description: 'Account type: user or org. Applies to both GitHub and Gitee sides (asymmetric types are not supported).'
     required: false
     default: 'user'
   include-private:

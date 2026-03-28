@@ -22,6 +22,7 @@ case "$GITHUB_TOKEN" in
     echo "[WARNING] GITHUB_TOKEN appears to be the GitHub Actions built-in token (ghs_ prefix)."
     echo "  This token only has permissions for the current repository."
     echo "  Please provide a Personal Access Token (PAT) with 'repo' scope for cross-repo sync."
+    echo "  For organization repos, also add 'read:org' scope."
     ;;
 esac
 

@@ -24,7 +24,7 @@ Sync All the Repos(public/private) between GitHub and Gitee.
 
 ### 前置条件
 
-- [GitHub Personal Access Token](https://github.com/settings/tokens)（需要 `repo` 权限）
+- [GitHub Personal Access Token](https://github.com/settings/tokens)（需要 `repo` 权限；同步组织仓库还需要 `read:org` 权限）
 - [Gitee Personal Access Token](https://gitee.com/profile/personal_access_tokens)（需要 `projects` 权限）
 
 ### 使用 GitHub Action
@@ -91,7 +91,7 @@ docker run --rm --env-file .env github-gitee-sync
 | GitHub Token | `GITHUB_TOKEN` | `--github-token` | ✅ | - | GitHub Personal Access Token |
 | Gitee 账号 | `GITEE_OWNER` | `--gitee-owner` | ✅ | - | Gitee 用户名或组织名 |
 | Gitee Token | `GITEE_TOKEN` | `--gitee-token` | ✅ | - | Gitee Personal Access Token |
-| 账号类型 | `ACCOUNT_TYPE` | `--account-type` | ❌ | `user` | `user`（个人）或 `org`（组织） |
+| 账号类型 | `ACCOUNT_TYPE` | `--account-type` | ❌ | `user` | `user`（个人）或 `org`（组织），同时应用于 GitHub 和 Gitee 两侧 |
 | 包含私有仓库 | `INCLUDE_PRIVATE` | `--include-private` | ❌ | `true` | 是否同步私有仓库 |
 | 排除仓库 | `EXCLUDE_REPOS` | `--exclude-repos` | ❌ | 空 | 逗号分隔的仓库名列表 |
 | 同步方向 | `SYNC_DIRECTION` | `--direction` | ❌ | `github2gitee` | `github2gitee` / `gitee2github` / `both` |
@@ -131,7 +131,12 @@ docker run --rm --env-file .env github-gitee-sync
     gitee-token: ${{ secrets.GITEE_TOKEN }}
     account-type: org
     exclude-repos: 'old-repo,deprecated-repo'
+```
 
+> **注意**：`account-type` 参数同时应用于 GitHub 和 Gitee 两侧，不支持非对称配置（例如 GitHub 为个人账号而 Gitee 为组织账号）。如需同步组织仓库，两侧均须为组织账号。
+> 同步组织仓库时，GitHub Token 需要额外的 `read:org` 权限。
+
+```yaml
 # 同步 Releases 和 Wiki，读取 Action 输出
 - uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1
   id: sync

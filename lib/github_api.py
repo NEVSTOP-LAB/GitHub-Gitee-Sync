@@ -79,7 +79,8 @@ def validate_github_token(token):
             raise Exception(
                 "GitHub Token authentication failed (HTTP 401).\n"
                 "  Please check your token: https://github.com/settings/tokens\n"
-                "  Required scope: repo (full repository access)"
+                "  Required scope: repo (full repository access)\n"
+                "  For organization repos, also requires: read:org"
             )
         if resp.status_code != 200:
             raise Exception(
