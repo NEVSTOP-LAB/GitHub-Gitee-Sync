@@ -196,12 +196,27 @@ def mirror_sync(source_url, target_url, repo_name,
         return "failed"
     finally:
         # --- Step 4: 清理临时目录和 askpass 脚本 ---
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        # 确保临时文件被清理，即使发生异常
+        # 对应: 安全评审 — 防止敏感数据残留
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=False)
+        except Exception as e:
+            # 清理失败记录警告，但不影响返回结果
+            logging.warning(
+                f"  Failed to clean up temp directory {temp_dir}: {e}"
+            )
+
         for p in askpass_paths:
             try:
-                os.unlink(p)
-            except OSError:
-                pass
+                # 先尝试覆盖文件内容再删除，防止数据恢复
+                if os.path.exists(p):
+                    # 用零覆盖文件内容
+                    file_size = os.path.getsize(p)
+                    with open(p, 'wb') as f:
+                        f.write(b'\x00' * file_size)
+                    os.unlink(p)
+            except OSError as e:
+                logging.warning(f"  Failed to clean askpass script {p}: {e}")
 
 
 # ===========================================================================

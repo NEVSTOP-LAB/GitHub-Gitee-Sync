@@ -13,7 +13,6 @@ lib/utils.py — 通用工具模块
 - docs/计划/Python-脚本设计.md — api_request, mask_token, setup_logging
 """
 
-import base64
 import logging
 import os
 import re
@@ -123,6 +122,53 @@ def setup_logging():
 
 
 # ===========================================================================
+# 输入验证
+# ===========================================================================
+
+
+def validate_repo_name(repo_name):
+    """验证仓库名称的安全性，防止路径遍历和注入攻击。
+
+    仓库名应当:
+    - 仅包含字母、数字、连字符、下划线、点号
+    - 不包含路径遍历字符（..）
+    - 不以点号开头或结尾
+    - 长度在合理范围内（1-100字符）
+
+    Args:
+        repo_name: 待验证的仓库名。
+
+    Returns:
+        True 如果仓库名合法，False 如果不合法。
+
+    对应: 安全评审 — 防止路径遍历和命令注入
+    """
+    if not repo_name or not isinstance(repo_name, str):
+        return False
+
+    # 长度检查
+    if len(repo_name) < 1 or len(repo_name) > 100:
+        return False
+
+    # 不允许路径遍历
+    if '..' in repo_name or '/' in repo_name or '\\' in repo_name:
+        return False
+
+    # 不允许以点号开头或结尾
+    if repo_name.startswith('.') or repo_name.endswith('.'):
+        return False
+
+    # 仅允许字母、数字、连字符、下划线、点号
+    # 这是 GitHub 和 Gitee 都支持的字符集交集
+    import string
+    allowed = string.ascii_letters + string.digits + '-_.'
+    if not all(c in allowed for c in repo_name):
+        return False
+
+    return True
+
+
+# ===========================================================================
 # Token 与 URL 工具
 # ===========================================================================
 
@@ -130,10 +176,51 @@ def setup_logging():
 def mask_token(text):
     """在日志文本中隐藏 Token 信息，防止凭据泄漏。
 
-    将 https://<token>@... 形式的 URL 中的 token 部分替换为 ***。
+    覆盖多种 Token 暴露场景:
+    - URL 中的 token: https://<token>@...
+    - 查询参数中的 token: ?access_token=...
+    - GitHub personal access tokens: ghp_*, gho_*, github_pat_*
+    - 通用 Bearer tokens
+
+    Args:
+        text: 待脱敏的文本。
+
+    Returns:
+        脱敏后的文本。
+
     对应需求: docs/计划/错误处理设计.md — "Token 信息脱敏"
+    安全加强: 支持更多 token 格式检测
     """
-    return re.sub(r'https://[^@]+@', 'https://***@', str(text))
+    if not text:
+        return text
+
+    text = str(text)
+
+    # 1. URL 中内嵌的凭据: https://token@github.com
+    text = re.sub(r'https://[^@\s]+@', 'https://***@', text)
+
+    # 2. 查询参数中的 token: ?access_token=xxx&...
+    # 保留原始分隔符 (? 或 &) 以避免生成形如 foo=1?access_token=*** 的非法 URL
+    text = re.sub(r'([?&])access_token=[^&\s]+', r'\1access_token=***', text)
+
+    # 3. GitHub Personal Access Tokens (ghp_, gho_, github_pat_)
+    text = re.sub(r'ghp_[a-zA-Z0-9]{36}', 'ghp_***', text)
+    text = re.sub(r'gho_[a-zA-Z0-9]{36}', 'gho_***', text)
+    text = re.sub(r'github_pat_[a-zA-Z0-9_]{82}', 'github_pat_***', text)
+
+    # 4. Bearer tokens in headers (捕获 Authorization: Bearer <token>)
+    text = re.sub(r'Bearer\s+[a-zA-Z0-9_\-\.]{20,}', 'Bearer ***', text)
+
+    # 5. 通用长字符串 token (长度>40的字母数字混合字符串)
+    # 注意: 匹配 {40,} 但仅脱敏长度 > 40 的字符串，跳过恰好 40 字符的
+    # SHA-1 哈希（git commit hash 等），避免误脱敏非 token 内容
+    text = re.sub(
+        r'\b[a-zA-Z0-9_\-]{40,}\b',
+        lambda m: m.group(0)[:8] + '***' if len(m.group(0)) > 40 else m.group(0),
+        text
+    )
+
+    return text
 
 
 def sanitize_response_text(text, max_len=200):
@@ -186,15 +273,16 @@ def make_git_env(token):
     """构建 git 子进程的认证环境变量，通过 GIT_ASKPASS 安全传递 Token。
 
     工作原理:
-    - 创建临时 shell 脚本，内容为 echo <token>
+    - 创建临时 Python 脚本，打印 token 到 stdout
     - 设置 GIT_ASKPASS 指向该脚本
     - git 需要密码时自动调用该脚本获取 Token
     - 调用方负责在 git 操作完成后清理临时脚本（路径保存在返回的 env 中）
 
     安全优势:
     - Token 不出现在 URL 中（不会泄露到进程列表/git 错误消息）
-    - 脚本文件仅当前用户可读/可执行（权限 0o700）
+    - 脚本文件仅当前用户可读/可执行（原子性权限设置）
     - 调用方用完后立即删除脚本文件
+    - 使用 Python 脚本避免 shell 注入风险
 
     Args:
         token: 个人访问令牌。
@@ -205,16 +293,24 @@ def make_git_env(token):
         - askpass_path: 临时 askpass 脚本路径，调用方负责 os.unlink() 清理
 
     对应: PR review — "使用 GIT_ASKPASS 而非 URL 内联 Token，减少 Token 暴露"
+    安全修复: 使用 Python 脚本代替 shell 脚本，避免命令注入风险
     """
-    # 创建临时 askpass 脚本: git 需要密码时执行该脚本，stdout 作为密码
-    # 使用 base64 编码 token 避免 shell 注入（token 中可能包含单引号等特殊字符）
-    encoded = base64.b64encode(token.encode()).decode()
-    fd, askpass_path = tempfile.mkstemp(prefix="git_askpass_", suffix=".sh")
-    with os.fdopen(fd, "w") as f:
-        f.write(
-            "#!/bin/sh\n"
-            f"echo \"$(echo '{encoded}' | base64 -d)\"\n"
+    # 创建临时 askpass Python 脚本，避免 shell 注入风险
+    # 使用 mkstemp() 原子性创建唯一文件，避免 mktemp 的安全隐患
+    fd, askpass_path = tempfile.mkstemp(prefix="git_askpass_", suffix=".py")
+    try:
+        # 使用 Python 脚本打印 token，完全避免 shell 解释
+        script_content = (
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            # Token 使用 repr() 转义，确保特殊字符安全
+            f"sys.stdout.write({repr(token)})\n"
         )
+        os.write(fd, script_content.encode())
+    finally:
+        os.close(fd)
+
+    # 设置可执行权限（保持只有所有者可读写执行）
     os.chmod(askpass_path, 0o700)
 
     env = os.environ.copy()
