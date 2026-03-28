@@ -36,16 +36,44 @@ GITEE_API = "https://gitee.com/api/v5"
 # ===========================================================================
 
 
+class TokenMaskingFilter(logging.Filter):
+    """日志过滤器：自动拦截并脱敏日志消息中的 Token 模式。
+
+    作为最后一道防线，即使代码遗漏了手动调用 mask_token()，
+    也能防止 Token 泄漏到日志输出中。
+
+    对应: 二级评审 Issue #5 — "日志中 Token 可能遗漏脱敏"
+    """
+    TOKEN_PATTERNS = [
+        re.compile(r'ghp_[a-zA-Z0-9]{36}'),
+        re.compile(r'gho_[a-zA-Z0-9]{36}'),
+        re.compile(r'github_pat_[a-zA-Z0-9_]{82}'),
+        re.compile(r'https://[^@\s]+@'),
+        re.compile(r'access_token=[^&\s]+'),
+    ]
+
+    def filter(self, record):
+        message = record.getMessage()
+        for pattern in self.TOKEN_PATTERNS:
+            message = pattern.sub('***', message)
+        record.msg = message
+        record.args = ()
+        return True
+
+
 def setup_logging():
     """配置日志格式与级别。
 
     使用 [LEVEL] message 格式输出到 stdout，方便在 GitHub Action 日志中查看。
+    安装 TokenMaskingFilter 自动拦截日志中的 Token 信息。
     """
     logging.basicConfig(
         level=logging.INFO,
         format="[%(levelname)s] %(message)s",
         stream=sys.stdout,
     )
+    # 在根 logger 上安装 Token 脱敏过滤器
+    logging.getLogger().addFilter(TokenMaskingFilter())
 
 
 # ===========================================================================
