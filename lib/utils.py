@@ -58,7 +58,7 @@ class TokenMaskingFilter(logging.Filter):
         re.compile(r'github_pat_[a-zA-Z0-9_]{82}'),
         re.compile(r'https://[^@\s]+@'),
         re.compile(r'access_token=[^&\s]+'),
-        re.compile(r'Bearer\s+[a-zA-Z0-9_\-\.]+', re.IGNORECASE),
+        re.compile(r'Bearer\s+\S+', re.IGNORECASE),
     ]
 
     def filter(self, record):

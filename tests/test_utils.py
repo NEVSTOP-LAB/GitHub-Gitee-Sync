@@ -757,8 +757,8 @@ class TestWriteActionOutputsSecurity:
 
 class TestPaginatedGetSafetyLimit:
     @patch("lib.utils.api_request")
-    def test_stops_at_max_pages(self, mock_request):
-        """分页应在安全上限处停止"""
+    def test_stops_on_empty_response(self, mock_request):
+        """分页应在空响应时停止"""
         # 模拟前 5 页有数据，第 6 页返回空列表
         responses = [MagicMock(status_code=200,
                                json=MagicMock(return_value=[{"id": i}]))
@@ -770,3 +770,24 @@ class TestPaginatedGetSafetyLimit:
         result = paginated_get("github", "token", "/test")
         assert len(result) == 5
         assert mock_request.call_count == 6
+
+    @patch("lib.utils.api_request")
+    def test_enforces_max_pages_safety_limit(self, mock_request):
+        """分页安全上限: 即使 API 持续返回非空数据也应在 MAX_PAGES 处停止"""
+        # 模拟 API 始终返回非空数据（不会自然停止）
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = [{"id": 1}]
+        mock_request.return_value = mock_resp
+
+        # 临时将 MAX_PAGES 设为较小值以加速测试
+        import lib.utils as utils_module
+        original_code = utils_module.paginated_get
+
+        # 使用 monkeypatch 方式: 在函数内部引用的 MAX_PAGES 是局部变量
+        # 我们需要通过调用函数并计算 mock 调用次数来验证
+        # 由于 MAX_PAGES=500 太大，我们验证调用次数不超过合理范围
+        result = paginated_get("github", "token", "/test")
+        # 应在 500 页时停止（每页 1 条 = 500 条结果）
+        assert len(result) == 500
+        assert mock_request.call_count == 500
