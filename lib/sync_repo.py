@@ -699,28 +699,30 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
             # Push wiki 使用 target_token 认证（增量推送，不删除目标独有内容）
             tgt_env, tgt_askpass = make_git_env(target_token)
             askpass_paths.append(tgt_askpass)
-            result = subprocess.run(
+            push_result = subprocess.run(
                 ["git", "push", "--all", "--force", target_url],
                 cwd=temp_dir,
                 capture_output=True, text=True, timeout=GIT_TIMEOUT,
                 env=tgt_env,
             )
-            if result.returncode != 0:
+            if push_result.returncode != 0:
                 logging.warning(
-                    f"  Wiki push failed: {mask_token(result.stderr)}"
+                    f"  Wiki push failed: "
+                    f"{mask_token(push_result.stderr)}"
                 )
             else:
                 # 推送标签（Wiki 通常无标签，但为完整性保留）
-                result = subprocess.run(
+                # Wiki 同步为非致命操作，标签推送失败仅记录警告
+                tags_result = subprocess.run(
                     ["git", "push", "--tags", "--force", target_url],
                     cwd=temp_dir,
                     capture_output=True, text=True, timeout=GIT_TIMEOUT,
                     env=tgt_env,
                 )
-                if result.returncode != 0:
+                if tags_result.returncode != 0:
                     logging.warning(
                         f"  Wiki tags push failed: "
-                        f"{mask_token(result.stderr)}"
+                        f"{mask_token(tags_result.stderr)}"
                     )
                 else:
                     logging.info(f"  Wiki synced ✓")
