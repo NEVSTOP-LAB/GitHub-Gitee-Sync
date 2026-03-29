@@ -16,10 +16,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY sync.py .
 COPY lib/ ./lib/
 COPY entrypoint.py .
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
 
-# Use entrypoint.sh as entry point
-# - GitHub Action mode: receives INPUT_* env vars, maps them, calls sync.py
-# - Docker standalone mode: uses standard env vars directly
-ENTRYPOINT ["/entrypoint.sh"]
+# Use entrypoint.py directly as the entry point (no shell shim).
+# GitHub Actions Docker container actions set inputs as INPUT_{NAME} where
+# {NAME} is the uppercased input name with hyphens PRESERVED (e.g.
+# INPUT_GITHUB-OWNER).  POSIX shells like dash (/bin/sh on Debian) strip
+# environment variables whose names contain hyphens, so invoking Python
+# through a shell wrapper would lose those variables.  By calling Python
+# directly we ensure os.environ sees every INPUT_* variable.
+ENTRYPOINT ["python3", "/app/entrypoint.py"]
