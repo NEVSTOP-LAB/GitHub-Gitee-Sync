@@ -252,6 +252,47 @@ class TestMakeGitEnv:
         env, path = make_git_env(token)
         try:
             result = subprocess.run(
+                [path, "Password for 'https://user@gitee.com': "],
+                capture_output=True, text=True, timeout=5
+            )
+            assert result.stdout.strip() == token
+        finally:
+            os.unlink(path)
+
+    def test_askpass_script_outputs_username_for_username_prompt(self):
+        """askpass 脚本在询问用户名时返回用户名，而非 token"""
+        token = "ghp_1234567890abcdef"
+        username = "myuser"
+        env, path = make_git_env(token, username)
+        try:
+            result = subprocess.run(
+                [path, "Username for 'https://gitee.com': "],
+                capture_output=True, text=True, timeout=5
+            )
+            assert result.stdout.strip() == username
+        finally:
+            os.unlink(path)
+
+    def test_askpass_script_outputs_token_for_password_prompt(self):
+        """askpass 脚本在询问密码时返回 token"""
+        token = "ghp_1234567890abcdef"
+        username = "myuser"
+        env, path = make_git_env(token, username)
+        try:
+            result = subprocess.run(
+                [path, "Password for 'https://myuser@gitee.com': "],
+                capture_output=True, text=True, timeout=5
+            )
+            assert result.stdout.strip() == token
+        finally:
+            os.unlink(path)
+
+    def test_askpass_script_outputs_token_with_no_prompt_arg(self):
+        """askpass 脚本在没有参数时返回 token（兼容性回退）"""
+        token = "ghp_1234567890abcdef"
+        env, path = make_git_env(token)
+        try:
+            result = subprocess.run(
                 [path], capture_output=True, text=True, timeout=5
             )
             assert result.stdout.strip() == token
@@ -264,7 +305,8 @@ class TestMakeGitEnv:
         env, path = make_git_env(token)
         try:
             result = subprocess.run(
-                [path], capture_output=True, text=True, timeout=5
+                [path, "Password for 'https://gitee.com': "],
+                capture_output=True, text=True, timeout=5
             )
             assert result.stdout.strip() == token
         finally:
@@ -276,7 +318,8 @@ class TestMakeGitEnv:
         env, path = make_git_env(token)
         try:
             result = subprocess.run(
-                [path], capture_output=True, text=True, timeout=5
+                [path, "Password for 'https://gitee.com': "],
+                capture_output=True, text=True, timeout=5
             )
             assert result.stdout.strip() == token
         finally:
