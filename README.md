@@ -93,7 +93,8 @@ docker run --rm --env-file .env github-gitee-sync
 | Gitee Token | `GITEE_TOKEN` | `--gitee-token` | ✅ | - | Gitee Personal Access Token |
 | 账号类型 | `ACCOUNT_TYPE` | `--account-type` | ❌ | `user` | `user`（个人）或 `org`（组织），同时应用于 GitHub 和 Gitee 两侧 |
 | 包含私有仓库 | `INCLUDE_PRIVATE` | `--include-private` | ❌ | `true` | 是否同步私有仓库 |
-| 排除仓库 | `EXCLUDE_REPOS` | `--exclude-repos` | ❌ | 空 | 逗号分隔的仓库名列表 |
+| 指定仓库（允许列表） | `INCLUDE_REPOS` | `--include-repos` | ❌ | 空 | 逗号分隔的仓库名列表；设置后**仅同步**这些仓库，优先于排除列表 |
+| 排除仓库 | `EXCLUDE_REPOS` | `--exclude-repos` | ❌ | 空 | 逗号分隔的仓库名列表；当 `include-repos` 已设置时此参数被忽略 |
 | 同步方向 | `SYNC_DIRECTION` | `--direction` | ❌ | `github2gitee` | `github2gitee` / `gitee2github` / `both` |
 | 创建不存在的仓库 | `CREATE_MISSING_REPOS` | `--create-missing-repos` | ❌ | `true` | 目标仓库不存在时是否自动创建 |
 | 附属信息同步 | `SYNC_EXTRA` | `--sync-extra` | ❌ | 空 | 逗号分隔：`releases,wiki,labels,milestones,issues` |
@@ -166,6 +167,15 @@ docker run --rm --env-file .env github-gitee-sync
     gitee-owner: myuser
     gitee-token: ${{ secrets.GITEE_TOKEN }}
     direction: both
+
+# 仅同步指定的仓库（允许列表）
+- uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1
+  with:
+    github-owner: myuser
+    github-token: ${{ secrets.GH_TOKEN }}
+    gitee-owner: myuser
+    gitee-token: ${{ secrets.GITEE_TOKEN }}
+    include-repos: 'repo-a,repo-b'
 
 # 同步组织仓库，排除部分仓库
 - uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1
