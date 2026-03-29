@@ -134,6 +134,22 @@ class TestParseArgs:
         assert args.github_owner == "env_gh_owner"
         assert args.gitee_owner == "env_gitee_owner"
 
+    def test_input_env_var_fallback(self):
+        """当仅存在 INPUT_* 环境变量时也能解析必填参数"""
+        env = {
+            "INPUT_GITHUB_OWNER": "input_gh_owner",
+            "INPUT_GITHUB_TOKEN": "input_gh_token",
+            "INPUT_GITEE-OWNER": "input_gitee_owner",
+            "INPUT_GITEE-TOKEN": "input_gitee_token",
+        }
+        with patch.dict(os.environ, env, clear=True), \
+             patch("sys.argv", ["sync.py"]):
+            args = parse_args()
+        assert args.github_owner == "input_gh_owner"
+        assert args.github_token == "input_gh_token"
+        assert args.gitee_owner == "input_gitee_owner"
+        assert args.gitee_token == "input_gitee_token"
+
     def test_direction_choices(self):
         for direction in ("github2gitee", "gitee2github", "both"):
             args = self._parse([f"--direction={direction}"])

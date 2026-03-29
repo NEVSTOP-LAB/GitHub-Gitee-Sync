@@ -62,6 +62,24 @@ from lib.sync_repo import (
 # ===========================================================================
 
 
+def _env_or_input(name: str, default: str | None = None) -> str | None:
+    """读取环境变量，兼容 GitHub Actions 的 INPUT_* 形式。
+
+    优先级: 常规环境变量 > INPUT_{NAME-with-hyphen} > INPUT_{NAME}
+    空字符串视为未设置。
+    """
+    base = name.upper()
+    candidates = (
+        os.environ.get(base),
+        os.environ.get(f"INPUT_{base.replace('_', '-')}"),
+        os.environ.get(f"INPUT_{base}"),
+    )
+    for val in candidates:
+        if val:
+            return val
+    return default
+
+
 def parse_args():
     """解析命令行参数和环境变量。
 
@@ -93,40 +111,40 @@ def parse_args():
     # --- 必填参数 ---
     parser.add_argument(
         "--github-owner",
-        default=os.environ.get("GITHUB_OWNER"),
+        default=_env_or_input("GITHUB_OWNER"),
         help="GitHub username or organization name",
     )
     parser.add_argument(
         "--github-token",
-        default=os.environ.get("GITHUB_TOKEN"),
+        default=_env_or_input("GITHUB_TOKEN"),
         help="GitHub Personal Access Token",
     )
     parser.add_argument(
         "--gitee-owner",
-        default=os.environ.get("GITEE_OWNER"),
+        default=_env_or_input("GITEE_OWNER"),
         help="Gitee username or organization name",
     )
     parser.add_argument(
         "--gitee-token",
-        default=os.environ.get("GITEE_TOKEN"),
+        default=_env_or_input("GITEE_TOKEN"),
         help="Gitee Personal Access Token",
     )
 
     # --- 可选参数 ---
     parser.add_argument(
         "--account-type",
-        default=os.environ.get("ACCOUNT_TYPE", "user"),
+        default=_env_or_input("ACCOUNT_TYPE", "user"),
         choices=["user", "org"],
         help="Account type: user or org (default: user)",
     )
     parser.add_argument(
         "--include-private",
-        default=os.environ.get("INCLUDE_PRIVATE", "true"),
+        default=_env_or_input("INCLUDE_PRIVATE", "true"),
         help="Whether to include private repositories (default: true)",
     )
     parser.add_argument(
         "--include-repos",
-        default=os.environ.get("INCLUDE_REPOS", ""),
+        default=_env_or_input("INCLUDE_REPOS", ""),
         help=(
             "Comma-separated list of repository names to include (allow list). "
             "When set, ONLY these repos are synced. "
@@ -135,23 +153,23 @@ def parse_args():
     )
     parser.add_argument(
         "--exclude-repos",
-        default=os.environ.get("EXCLUDE_REPOS", ""),
+        default=_env_or_input("EXCLUDE_REPOS", ""),
         help="Comma-separated list of repository names to exclude",
     )
     parser.add_argument(
         "--direction",
-        default=os.environ.get("SYNC_DIRECTION", "github2gitee"),
+        default=_env_or_input("SYNC_DIRECTION", "github2gitee"),
         choices=["github2gitee", "gitee2github", "both"],
         help="Sync direction (default: github2gitee)",
     )
     parser.add_argument(
         "--create-missing-repos",
-        default=os.environ.get("CREATE_MISSING_REPOS", "true"),
+        default=_env_or_input("CREATE_MISSING_REPOS", "true"),
         help="Create repos on target if they don't exist (default: true)",
     )
     parser.add_argument(
         "--sync-extra",
-        default=os.environ.get("SYNC_EXTRA", ""),
+        default=_env_or_input("SYNC_EXTRA", ""),
         help=(
             "Comma-separated extra items to sync: "
             "releases,wiki,labels,milestones,issues"
@@ -161,7 +179,7 @@ def parse_args():
     # 对应需求: 用户反馈 — "增加 dry-run 选项，运行全部的功能，但不实际同步"
     parser.add_argument(
         "--dry-run",
-        default=os.environ.get("DRY_RUN", "false"),
+        default=_env_or_input("DRY_RUN", "false"),
         help=(
             "Run all logic without performing actual sync operations "
             "(default: false). Useful for debugging and testing."
