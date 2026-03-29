@@ -74,12 +74,11 @@ def main() -> None:
     }
 
     for key, value in mappings.items():
-        # Set the env var when we have a non-empty value.  An empty string means
-        # "not provided" and should not override a value already in os.environ.
+        # Set the env var only when we have a non-empty value.  An empty string
+        # means "not provided" and we should not set it at all, allowing sync.py
+        # to properly detect missing required parameters.
         if value:
             os.environ[key] = value
-        elif key not in os.environ:
-            os.environ[key] = ""
 
     # Issue #15: warn when the caller accidentally passes the ephemeral
     # GitHub Actions built-in token (ghs_ prefix) instead of a PAT.
