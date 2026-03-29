@@ -269,13 +269,13 @@ def build_clone_url(platform, owner, repo_name):
         return f"https://gitee.com/{owner}/{repo_name}.git"
 
 
-def make_git_env(token, username="git"):
+def make_git_env(token):
     """构建 git 子进程的认证环境变量，通过 GIT_ASKPASS 安全传递 Token。
 
     工作原理:
-    - 创建临时 Python 脚本，根据 git 的提示类型返回用户名或 token
+    - 创建临时 Python 脚本，打印 token 到 stdout
     - 设置 GIT_ASKPASS 指向该脚本
-    - git 询问用户名时返回 username，询问密码时返回 token
+    - git 需要密码时自动调用该脚本获取 Token
     - 调用方负责在 git 操作完成后清理临时脚本（路径保存在返回的 env 中）
 
     安全优势:
@@ -286,9 +286,6 @@ def make_git_env(token, username="git"):
 
     Args:
         token: 个人访问令牌。
-        username: Git HTTPS 用户名（默认 "git"）。
-            Gitee 要求此值与 token 所有者的用户名匹配，
-            GitHub 接受任意非空用户名。
 
     Returns:
         (env_dict, askpass_path) 元组:
@@ -302,19 +299,12 @@ def make_git_env(token, username="git"):
     # 使用 mkstemp() 原子性创建唯一文件，避免 mktemp 的安全隐患
     fd, askpass_path = tempfile.mkstemp(prefix="git_askpass_", suffix=".py")
     try:
-        # 使用 Python 脚本根据提示类型返回用户名或 token，完全避免 shell 解释
-        # git 调用 askpass 时将提示字符串作为第一个参数传入，例如:
-        #   "Username for 'https://gitee.com': "
-        #   "Password for 'https://user@gitee.com': "
-        # 用户名和 token 均使用 repr() 转义，确保特殊字符安全
+        # 使用 Python 脚本打印 token，完全避免 shell 解释
         script_content = (
             "#!/usr/bin/env python3\n"
             "import sys\n"
-            f"prompt = sys.argv[1].lower() if len(sys.argv) > 1 else ''\n"
-            f"if 'username' in prompt:\n"
-            f"    sys.stdout.write({repr(username)})\n"
-            f"else:\n"
-            f"    sys.stdout.write({repr(token)})\n"
+            # Token 使用 repr() 转义，确保特殊字符安全
+            f"sys.stdout.write({repr(token)})\n"
         )
         os.write(fd, script_content.encode())
     finally:
