@@ -445,6 +445,8 @@ def sync_all(args):
     """
     direction = args.direction
     dry_run = args.dry_run
+    # Token 所有者用户名由 main() 中的 validate_*_token() 设置到 args 上。
+    # 使用 getattr 防御性回退，确保测试等场景下不会因缺少属性而崩溃。
     github_username = getattr(args, "github_username", "git")
     gitee_username = getattr(args, "gitee_username", "git")
     total_synced = 0
