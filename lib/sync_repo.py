@@ -67,7 +67,8 @@ SYNC_MARKER = "<!-- synced-from: {url} -->"
 
 
 def mirror_sync(source_url, target_url, repo_name,
-                source_token, target_token, dry_run=False):
+                source_token, target_token, dry_run=False,
+                source_username="git", target_username="git"):
     """执行 git clone --mirror + git push --all/--tags --force 完成代码同步。
 
     这是仓库同步的核心步骤。使用增量方式同步所有分支和标签，
@@ -87,7 +88,10 @@ def mirror_sync(source_url, target_url, repo_name,
 
     认证方式:
     - 使用 GIT_ASKPASS 临时脚本传递 Token（不在 URL 中内联 Token）
-    - clone 使用 source_token，push 使用 target_token
+    - askpass 脚本根据 git 提示类型返回用户名或 token:
+        用户名提示 → source_username / target_username
+        密码提示   → source_token / target_token
+    - Gitee 要求用户名与 token 所有者匹配；GitHub 接受任意用户名。
     - 对应: PR review — "使用 GIT_ASKPASS 减少 Token 暴露"
 
     对应需求:
@@ -102,6 +106,8 @@ def mirror_sync(source_url, target_url, repo_name,
         source_token: 源平台 Token（用于 clone 认证）。
         target_token: 目标平台 Token（用于 push 认证）。
         dry_run: 如果为 True，跳过实际 git 操作。
+        source_username: 源平台 Token 所有者的用户名（用于 HTTPS 认证）。
+        target_username: 目标平台 Token 所有者的用户名（用于 HTTPS 认证）。
 
     Returns:
         'success': 同步成功。
@@ -117,7 +123,7 @@ def mirror_sync(source_url, target_url, repo_name,
     try:
         # --- Step 1: git clone --mirror (使用 source_token 认证) ---
         logging.info(f"  Cloning from source ...")
-        src_env, src_askpass = make_git_env(source_token)
+        src_env, src_askpass = make_git_env(source_token, source_username)
         askpass_paths.append(src_askpass)
         result = subprocess.run(
             ["git", "clone", "--mirror", source_url, temp_dir],
@@ -149,7 +155,7 @@ def mirror_sync(source_url, target_url, repo_name,
 
         # --- Step 2: git push --all --force (推送所有分支，不删除目标独有分支) ---
         logging.info(f"  Pushing branches to target ...")
-        tgt_env, tgt_askpass = make_git_env(target_token)
+        tgt_env, tgt_askpass = make_git_env(target_token, target_username)
         askpass_paths.append(tgt_askpass)
         result = subprocess.run(
             ["git", "push", "--all", "--force", target_url],
@@ -644,7 +650,8 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
 
 
 def sync_wiki(source_platform, target_platform, source_owner, target_owner,
-              source_token, target_token, repo_name, dry_run=False):
+              source_token, target_token, repo_name, dry_run=False,
+              source_username="git", target_username="git"):
     """同步 Wiki（使用 git clone --mirror .wiki.git + git push --all/--tags --force）。
 
     Wiki 没有统一的 REST API（GitHub 完全不支持 Wiki REST API），
@@ -695,7 +702,7 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
         temp_dir = tempfile.mkdtemp(prefix=f"wiki_{repo_name}_")
         try:
             # Clone wiki 使用 source_token 认证
-            src_env, src_askpass = make_git_env(source_token)
+            src_env, src_askpass = make_git_env(source_token, source_username)
             askpass_paths.append(src_askpass)
             result = subprocess.run(
                 ["git", "clone", "--mirror", source_url, temp_dir],
@@ -712,7 +719,7 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
                 return
 
             # Push wiki 使用 target_token 认证（增量推送，不删除目标独有内容）
-            tgt_env, tgt_askpass = make_git_env(target_token)
+            tgt_env, tgt_askpass = make_git_env(target_token, target_username)
             askpass_paths.append(tgt_askpass)
             push_result = subprocess.run(
                 ["git", "push", "--all", "--force", target_url],
@@ -1219,7 +1226,8 @@ def _sync_issue_comments(source_platform, target_platform, source_owner,
 
 def sync_extras(source_platform, target_platform, source_owner, target_owner,
                 source_token, target_token, repo_name, sync_extra,
-                dry_run=False):
+                dry_run=False,
+                source_username="git", target_username="git"):
     """根据 sync_extra 参数调用对应的附属信息同步函数。
 
     对应需求: docs/计划/Python-脚本设计.md — sync_extra 参数
@@ -1228,6 +1236,8 @@ def sync_extras(source_platform, target_platform, source_owner, target_owner,
     Args:
         sync_extra: 需要同步的附属信息集合（如 {"releases", "wiki", "labels"}）。
         dry_run: 如果为 True，所有子功能均以 dry-run 模式运行。
+        source_username: 源平台 Token 所有者的用户名（用于 Wiki git 认证）。
+        target_username: 目标平台 Token 所有者的用户名（用于 Wiki git 认证）。
     """
     common_args = (
         source_platform, target_platform,
@@ -1242,7 +1252,9 @@ def sync_extras(source_platform, target_platform, source_owner, target_owner,
 
     if "wiki" in sync_extra:
         logging.info(f"  Syncing wiki ...")
-        sync_wiki(*common_args, dry_run=dry_run)
+        sync_wiki(*common_args, dry_run=dry_run,
+                  source_username=source_username,
+                  target_username=target_username)
 
     if "labels" in sync_extra:
         logging.info(f"  Syncing labels ...")
