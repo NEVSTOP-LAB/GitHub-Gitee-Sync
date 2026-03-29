@@ -392,7 +392,6 @@ def sync_one_direction(source_platform, target_platform, source_owner,
         result = mirror_sync(
             source_url, target_url, repo_name,
             source_token, target_token, dry_run,
-            source_owner=source_owner, target_owner=target_owner,
         )
 
         if result == "failed":
