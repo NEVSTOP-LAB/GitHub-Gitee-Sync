@@ -175,7 +175,7 @@ class TestMirrorSync:
         askpass_paths = ["/tmp/askpass_clone.sh", "/tmp/askpass_push.sh"]
         call_count = [0]
 
-        def fake_make_git_env(token):
+        def fake_make_git_env(token, username="git"):
             p = askpass_paths[call_count[0]]
             call_count[0] += 1
             return {}, p
