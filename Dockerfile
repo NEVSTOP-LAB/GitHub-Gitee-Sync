@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code (main entry + lib modules)
 COPY sync.py .
 COPY lib/ ./lib/
+COPY entrypoint.py .
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
