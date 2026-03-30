@@ -505,7 +505,13 @@ def paginated_get(platform, token, path, extra_params=None):
 
         # 返回数量小于 per_page 说明已到最后一页，无需继续请求。
         # 防止某些平台（如 Gitee）在超出最后一页后仍返回重复数据导致循环卡住。
-        if len(data) < PER_PAGE:
+        # 注意：per_page 可能通过 extra_params 被调用方覆盖，此处需使用实际请求的 per_page。
+        per_page_value = p.get("per_page", PER_PAGE)
+        try:
+            effective_per_page = int(per_page_value)
+        except (TypeError, ValueError):
+            effective_per_page = PER_PAGE
+        if len(data) < effective_per_page:
             break
 
         page += 1
