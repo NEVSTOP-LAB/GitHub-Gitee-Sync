@@ -551,7 +551,11 @@ class TestSyncWiki:
         show_ref_out = "abc123 refs/heads/master\n"
         ls_remote_out = "abc123\trefs/heads/master\n"
         in_sync_procs = [
+            # 1st: target wiki existence check (ls-remote)
+            _make_process(returncode=0, stdout=ls_remote_out),
+            # 2nd: _refs_already_in_sync → show-ref
             _make_process(returncode=0, stdout=show_ref_out),
+            # 3rd: _refs_already_in_sync → ls-remote
             _make_process(returncode=0, stdout=ls_remote_out),
         ]
         run_calls = []
@@ -605,6 +609,71 @@ class TestSyncWiki:
 
         push_calls = [c for c in run_calls if len(c) > 1 and c[1] == "push"]
         assert len(push_calls) >= 1  # at least --all push was executed
+
+    def test_skips_push_when_target_wiki_not_available(self, caplog):
+        """Wiki push should be skipped when target wiki does not exist (404)."""
+        run_calls = []
+
+        def fake_run(args, **kwargs):
+            run_calls.append(args)
+            cmd = args[1] if len(args) > 1 else args[0]
+            if cmd == "clone":
+                return _make_process(returncode=0)
+            elif cmd == "ls-remote":
+                # Target wiki does not exist → ls-remote fails with "not found"
+                return _make_process(
+                    returncode=128,
+                    stderr="remote: [session-abc] 404 not found!\n"
+                           "fatal: repository not found",
+                )
+            return _make_process(returncode=0)
+
+        with patch("lib.sync_repo.subprocess.run", side_effect=fake_run), \
+             patch("lib.sync_repo.make_git_env",
+                   return_value=({}, "/tmp/fake")), \
+             patch("lib.sync_repo.shutil.rmtree"), \
+             patch("lib.sync_repo.os.unlink"), \
+             patch("lib.sync_repo.tempfile.mkdtemp", return_value="/tmp/wiki"), \
+             caplog.at_level(logging.INFO, logger="root"):
+            sync_wiki("github", "gitee", "src_owner", "tgt_owner",
+                      "src_token", "tgt_token", "repo")
+
+        push_calls = [c for c in run_calls if len(c) > 1 and c[1] == "push"]
+        assert push_calls == [], f"Unexpected wiki push calls: {push_calls}"
+        assert any("not available on target" in r.message for r in caplog.records)
+
+    def test_proceeds_with_push_on_transient_lsremote_failure(self, caplog):
+        """Wiki push should proceed when ls-remote fails for non-404 reasons."""
+        run_calls = []
+
+        def fake_run(args, **kwargs):
+            run_calls.append(args)
+            cmd = args[1] if len(args) > 1 else args[0]
+            if cmd == "clone":
+                return _make_process(returncode=0)
+            elif cmd == "ls-remote":
+                # Transient network error — no "not found" in stderr
+                return _make_process(
+                    returncode=128,
+                    stderr="fatal: unable to access: Connection timed out",
+                )
+            return _make_process(returncode=0)
+
+        with patch("lib.sync_repo.subprocess.run", side_effect=fake_run), \
+             patch("lib.sync_repo.make_git_env",
+                   return_value=({}, "/tmp/fake")), \
+             patch("lib.sync_repo.shutil.rmtree"), \
+             patch("lib.sync_repo.os.unlink"), \
+             patch("lib.sync_repo.tempfile.mkdtemp", return_value="/tmp/wiki"), \
+             caplog.at_level(logging.INFO, logger="root"):
+            sync_wiki("github", "gitee", "src_owner", "tgt_owner",
+                      "src_token", "tgt_token", "repo")
+
+        # Should have logged a warning and still attempted push
+        assert any("ls-remote for wiki on target failed" in r.message
+                   for r in caplog.records)
+        push_calls = [c for c in run_calls if len(c) > 1 and c[1] == "push"]
+        assert len(push_calls) >= 1, "Should have attempted push despite ls-remote failure"
 
 
 # ===========================================================================

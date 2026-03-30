@@ -878,8 +878,34 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
             tgt_env, tgt_askpass = make_git_env(target_token, target_username)
             askpass_paths.append(tgt_askpass)
 
+            # 检查目标 Wiki 是否存在/可访问：
+            # - 若 ls-remote 明确指示仓库/Wiki 不存在，则认为目标未启用 Wiki 并跳过；
+            # - 否则记录警告（包括已脱敏的 stderr），继续后续同步流程。
+            tgt_lsremote_failed = False
+            tgt_check = subprocess.run(
+                ["git", "ls-remote", target_url],
+                capture_output=True, text=True, timeout=git_timeout,
+                env=tgt_env,
+            )
+            if tgt_check.returncode != 0:
+                stderr_text = tgt_check.stderr or ""
+                stderr_lower = stderr_text.lower()
+                if "not found" in stderr_lower or "repository not found" in stderr_lower:
+                    logging.info(
+                        f"  Wiki not available on target for "
+                        f"{log_repo_name}, skipping"
+                    )
+                    return
+                logging.warning(
+                    f"  git ls-remote for wiki on target failed for "
+                    f"{log_repo_name}: {mask_token(stderr_text)}; "
+                    f"proceeding with wiki sync attempt"
+                )
+                tgt_lsremote_failed = True
+
             # 检查两端 wiki refs 是否完全一致，一致则跳过推送
-            if _refs_already_in_sync(temp_dir, target_url, tgt_env, git_timeout):
+            if (not tgt_lsremote_failed
+                    and _refs_already_in_sync(temp_dir, target_url, tgt_env, git_timeout)):
                 logging.info(f"  Wiki already in sync, skipping push ⏭️")
                 return
 
