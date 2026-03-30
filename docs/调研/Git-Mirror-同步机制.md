@@ -179,7 +179,40 @@ repo.git.push("--mirror", target_url)
 
 ---
 
-## 6. 总结
+## 6. 推送前 refs 比较优化
+
+每次运行都执行完整 `git push --mirror` 会产生不必要的网络流量和目标端写操作。为此在推送前先对比两端 refs，若已完全一致则直接跳过推送。
+
+### 实现方式
+
+```python
+# 获取本地镜像的所有 refs
+local_refs = subprocess.run(["git", "show-ref"], ...)
+
+# 获取目标端的所有 refs
+remote_refs = subprocess.run(["git", "ls-remote", "--heads", "--tags", target_url], ...)
+
+# 解析为 {ref_name: sha} 字典后比较
+# 本地 refs ⊆ 远端 refs 且所有 SHA 相同 → 跳过推送
+```
+
+### 规则
+
+- 本地所有 refs 都已存在于目标端且 SHA 相同 → 跳过推送，输出 `"Both sides already in sync, skipping push ⏭️"`
+- 目标端独有的 refs（例如目标端独立提交）不视为差异，保持增量策略
+- 剥离型标签（`refs/tags/v1.0^{}`）自动过滤，仅比较轻量/注解标签指针
+- 任何 `git show-ref` 或 `git ls-remote` 报错均回退到正常推送，不影响同步正确性
+
+### 适用范围
+
+| 场景 | 说明 |
+|------|------|
+| 代码仓库同步（`mirror_sync`） | 比较所有 branches + tags |
+| Wiki 仓库同步（`sync_wiki`） | 同样比较 wiki refs，一致则跳过 `git push --all/--force` |
+
+---
+
+## 7. 总结
 
 | 维度 | 推荐方案 |
 |------|---------|

@@ -10,6 +10,7 @@ tests/test_sync_repo.py — lib/sync_repo.py 单元测试
 - sync_wiki(): dry-run 跳过, clone 失败静默跳过
 """
 
+import logging
 import os
 import subprocess
 from unittest.mock import MagicMock, patch, call
@@ -17,6 +18,7 @@ from unittest.mock import MagicMock, patch, call
 import pytest
 
 from lib.sync_repo import (
+    _refs_already_in_sync,
     mirror_sync,
     sync_labels,
     sync_releases,
@@ -232,8 +234,175 @@ class TestMirrorSync:
 
 
 # ===========================================================================
-# sync_wiki
+# _refs_already_in_sync
 # ===========================================================================
+
+class TestRefsAlreadyInSync:
+    """Tests for the _refs_already_in_sync() helper."""
+
+    _SHOW_REF_OUTPUT = (
+        "abc123 refs/heads/main\n"
+        "def456 refs/tags/v1.0\n"
+    )
+    _LS_REMOTE_IN_SYNC = (
+        "abc123\trefs/heads/main\n"
+        "def456\trefs/tags/v1.0\n"
+    )
+
+    def _run_side_effects(self, show_ref_out, ls_remote_rc, ls_remote_out):
+        """Build side_effect list: [show-ref result, ls-remote result]."""
+        return [
+            _make_process(returncode=0, stdout=show_ref_out),
+            _make_process(returncode=ls_remote_rc, stdout=ls_remote_out),
+        ]
+
+    def test_returns_true_when_refs_match(self):
+        with patch("lib.sync_repo.subprocess.run",
+                   side_effect=self._run_side_effects(
+                       self._SHOW_REF_OUTPUT, 0, self._LS_REMOTE_IN_SYNC)):
+            assert _refs_already_in_sync("/tmp/repo", "https://target.git", {}) is True
+
+    def test_returns_false_when_branch_hash_differs(self):
+        ls_out = "999999\trefs/heads/main\ndef456\trefs/tags/v1.0\n"
+        with patch("lib.sync_repo.subprocess.run",
+                   side_effect=self._run_side_effects(
+                       self._SHOW_REF_OUTPUT, 0, ls_out)):
+            assert _refs_already_in_sync("/tmp/repo", "https://target.git", {}) is False
+
+    def test_returns_false_when_target_missing_branch(self):
+        ls_out = "def456\trefs/tags/v1.0\n"
+        with patch("lib.sync_repo.subprocess.run",
+                   side_effect=self._run_side_effects(
+                       self._SHOW_REF_OUTPUT, 0, ls_out)):
+            assert _refs_already_in_sync("/tmp/repo", "https://target.git", {}) is False
+
+    def test_returns_false_when_show_ref_fails(self):
+        with patch("lib.sync_repo.subprocess.run",
+                   return_value=_make_process(returncode=1)):
+            assert _refs_already_in_sync("/tmp/repo", "https://target.git", {}) is False
+
+    def test_returns_false_when_ls_remote_fails(self):
+        with patch("lib.sync_repo.subprocess.run",
+                   side_effect=self._run_side_effects(
+                       self._SHOW_REF_OUTPUT, 128, "")):
+            assert _refs_already_in_sync("/tmp/repo", "https://target.git", {}) is False
+
+    def test_returns_false_on_timeout(self):
+        with patch("lib.sync_repo.subprocess.run",
+                   side_effect=[
+                       _make_process(returncode=0, stdout=self._SHOW_REF_OUTPUT),
+                       subprocess.TimeoutExpired("git", 600),
+                   ]):
+            assert _refs_already_in_sync("/tmp/repo", "https://target.git", {}) is False
+
+    def test_ignores_peeled_annotated_tag_refs(self):
+        """^{} peeled refs from ls-remote should be ignored in comparison."""
+        ls_out = (
+            "abc123\trefs/heads/main\n"
+            "def456\trefs/tags/v1.0\n"
+            "789012\trefs/tags/v1.0^{}\n"  # peeled — should be ignored
+        )
+        with patch("lib.sync_repo.subprocess.run",
+                   side_effect=self._run_side_effects(
+                       self._SHOW_REF_OUTPUT, 0, ls_out)):
+            assert _refs_already_in_sync("/tmp/repo", "https://target.git", {}) is True
+
+    def test_ignores_extra_refs_only_in_target(self):
+        """Extra branches/tags in target that are absent in source are allowed."""
+        ls_out = (
+            "abc123\trefs/heads/main\n"
+            "def456\trefs/tags/v1.0\n"
+            "111111\trefs/heads/feature-only-on-target\n"  # extra — not in source
+        )
+        with patch("lib.sync_repo.subprocess.run",
+                   side_effect=self._run_side_effects(
+                       self._SHOW_REF_OUTPUT, 0, ls_out)):
+            # Target has an extra branch, but all SOURCE branches/tags match → skip
+            assert _refs_already_in_sync("/tmp/repo", "https://target.git", {}) is True
+
+
+class TestMirrorSyncSkipWhenInSync:
+    """Tests for the push-skip optimization in mirror_sync()."""
+
+    def test_skips_push_and_logs_when_already_in_sync(self, caplog):
+        """When both sides are in sync, push should be skipped."""
+        clone_proc = _make_process(returncode=0)
+
+        show_ref_out = "abc123 refs/heads/main\n"
+        ls_remote_out = "abc123\trefs/heads/main\n"
+        in_sync_procs = [
+            _make_process(returncode=0, stdout=show_ref_out),
+            _make_process(returncode=0, stdout=ls_remote_out),
+        ]
+
+        run_calls = []
+
+        def fake_run(args, **kwargs):
+            run_calls.append(args)
+            if args[1] == "clone":
+                return clone_proc
+            return in_sync_procs.pop(0)
+
+        with patch("lib.sync_repo.subprocess.run", side_effect=fake_run), \
+             patch("lib.sync_repo.make_git_env",
+                   return_value=({}, "/tmp/fake_askpass")), \
+             patch("lib.sync_repo.shutil.rmtree"), \
+             patch("lib.sync_repo.os.unlink"), \
+             patch("lib.sync_repo.tempfile.mkdtemp", return_value="/tmp/testdir"), \
+             caplog.at_level(logging.INFO, logger="root"):
+            result = mirror_sync(
+                "https://github.com/src/repo.git",
+                "https://gitee.com/tgt/repo.git",
+                "repo",
+                "src_token", "tgt_token",
+            )
+
+        assert result == "success"
+        # No "git push" command should have been run
+        push_calls = [c for c in run_calls if "push" in c]
+        assert push_calls == [], f"Unexpected push calls: {push_calls}"
+        assert any("already in sync" in r.message for r in caplog.records)
+
+    def test_pushes_when_refs_differ(self):
+        """When refs differ, push should still be executed."""
+        clone_proc = _make_process(returncode=0)
+
+        show_ref_out = "abc123 refs/heads/main\n"
+        ls_remote_out = "999999\trefs/heads/main\n"  # different hash
+
+        run_calls = []
+
+        def fake_run(args, **kwargs):
+            run_calls.append(args)
+            cmd = args[1] if len(args) > 1 else args[0]
+            if cmd == "clone":
+                return clone_proc
+            elif cmd == "show-ref":
+                return _make_process(returncode=0, stdout=show_ref_out)
+            elif cmd == "ls-remote":
+                return _make_process(returncode=0, stdout=ls_remote_out)
+            # push --all and push --tags
+            return _make_process(returncode=0)
+
+        with patch("lib.sync_repo.subprocess.run", side_effect=fake_run), \
+             patch("lib.sync_repo.make_git_env",
+                   return_value=({}, "/tmp/fake")), \
+             patch("lib.sync_repo.shutil.rmtree"), \
+             patch("lib.sync_repo.os.unlink"), \
+             patch("lib.sync_repo.tempfile.mkdtemp", return_value="/tmp/testdir"):
+            result = mirror_sync(
+                "https://github.com/src/repo.git",
+                "https://gitee.com/tgt/repo.git",
+                "repo",
+                "src_token", "tgt_token",
+            )
+
+        assert result == "success"
+        push_calls = [c for c in run_calls if len(c) > 1 and c[1] == "push"]
+        assert len(push_calls) == 2  # one for --all and one for --tags
+
+
+
 
 class TestSyncWiki:
     def test_dry_run_skips_git_ops(self):
@@ -278,6 +447,66 @@ class TestSyncWiki:
         clone_cmd = run_calls[0]
         assert "myrepo.wiki.git" in clone_cmd[-2]
         assert "@" not in clone_cmd[-2]  # No token in URL
+
+    def test_skips_push_when_wiki_already_in_sync(self, caplog):
+        """Wiki push should be skipped when both sides already match."""
+        show_ref_out = "abc123 refs/heads/master\n"
+        ls_remote_out = "abc123\trefs/heads/master\n"
+        in_sync_procs = [
+            _make_process(returncode=0, stdout=show_ref_out),
+            _make_process(returncode=0, stdout=ls_remote_out),
+        ]
+        run_calls = []
+
+        def fake_run(args, **kwargs):
+            run_calls.append(args)
+            if args[1] == "clone":
+                return _make_process(returncode=0)
+            return in_sync_procs.pop(0)
+
+        with patch("lib.sync_repo.subprocess.run", side_effect=fake_run), \
+             patch("lib.sync_repo.make_git_env",
+                   return_value=({}, "/tmp/fake")), \
+             patch("lib.sync_repo.shutil.rmtree"), \
+             patch("lib.sync_repo.os.unlink"), \
+             patch("lib.sync_repo.tempfile.mkdtemp", return_value="/tmp/wiki"), \
+             caplog.at_level(logging.INFO, logger="root"):
+            sync_wiki("github", "gitee", "src_owner", "tgt_owner",
+                      "src_token", "tgt_token", "repo")
+
+        push_calls = [c for c in run_calls if len(c) > 1 and c[1] == "push"]
+        assert push_calls == [], f"Unexpected wiki push calls: {push_calls}"
+        assert any("already in sync" in r.message for r in caplog.records)
+
+    def test_pushes_wiki_when_refs_differ(self):
+        """Wiki push should run when refs differ."""
+        show_ref_out = "abc123 refs/heads/master\n"
+        ls_remote_out = "999999\trefs/heads/master\n"  # different hash
+
+        run_calls = []
+
+        def fake_run(args, **kwargs):
+            run_calls.append(args)
+            cmd = args[1] if len(args) > 1 else args[0]
+            if cmd == "clone":
+                return _make_process(returncode=0)
+            elif cmd == "show-ref":
+                return _make_process(returncode=0, stdout=show_ref_out)
+            elif cmd == "ls-remote":
+                return _make_process(returncode=0, stdout=ls_remote_out)
+            return _make_process(returncode=0)
+
+        with patch("lib.sync_repo.subprocess.run", side_effect=fake_run), \
+             patch("lib.sync_repo.make_git_env",
+                   return_value=({}, "/tmp/fake")), \
+             patch("lib.sync_repo.shutil.rmtree"), \
+             patch("lib.sync_repo.os.unlink"), \
+             patch("lib.sync_repo.tempfile.mkdtemp", return_value="/tmp/wiki"):
+            sync_wiki("github", "gitee", "src_owner", "tgt_owner",
+                      "src_token", "tgt_token", "repo")
+
+        push_calls = [c for c in run_calls if len(c) > 1 and c[1] == "push"]
+        assert len(push_calls) >= 1  # at least --all push was executed
 
 
 # ===========================================================================
