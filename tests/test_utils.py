@@ -867,27 +867,42 @@ class TestPaginatedGetSafetyLimit:
     @patch("lib.utils.api_request")
     def test_stops_on_empty_response(self, mock_request):
         """分页应在空响应时停止"""
-        # 模拟前 5 页有数据，第 6 页返回空列表
+        # 模拟前 5 页有满页数据（100 条），第 6 页返回空列表
+        full_page = [{"id": i} for i in range(100)]
         responses = [MagicMock(status_code=200,
-                               json=MagicMock(return_value=[{"id": i}]))
-                     for i in range(5)]
+                               json=MagicMock(return_value=full_page))
+                     for _ in range(5)]
         responses.append(MagicMock(status_code=200,
                                    json=MagicMock(return_value=[])))
         mock_request.side_effect = responses
 
         result = paginated_get("github", "token", "/test")
-        assert len(result) == 5
+        assert len(result) == 500
         assert mock_request.call_count == 6
 
     @patch("lib.utils.api_request")
+    def test_stops_when_page_smaller_than_per_page(self, mock_request):
+        """返回数量小于 per_page 时应停止分页（防止 Gitee 等平台重复返回数据）"""
+        partial_page = [{"id": i} for i in range(30)]
+        mock_request.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value=partial_page),
+        )
+
+        result = paginated_get("gitee", "token", "/test")
+        assert len(result) == 30
+        assert mock_request.call_count == 1
+
+    @patch("lib.utils.api_request")
     def test_enforces_max_pages_safety_limit(self, mock_request):
-        """分页安全上限: 即使 API 持续返回非空数据也应在 MAX_PAGES 处停止"""
+        """分页安全上限: 即使 API 持续返回满页数据也应在 MAX_PAGES 处停止"""
+        full_page = [{"id": i} for i in range(100)]
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.json.return_value = [{"id": 1}]
+        mock_resp.json.return_value = full_page
         mock_request.return_value = mock_resp
 
         # 调用 paginated_get 并验证在 MAX_PAGES(500) 上限处停止
         result = paginated_get("github", "token", "/test")
-        assert len(result) == 500
+        assert len(result) == 50000
         assert mock_request.call_count == 500

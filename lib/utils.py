@@ -467,10 +467,11 @@ def paginated_get(platform, token, path, extra_params=None):
     # 安全上限: 500 页 × 100 条/页 = 50000 条，足以覆盖绝大多数场景
     # 防止 API 异常响应导致无限循环
     MAX_PAGES = 500
+    PER_PAGE = 100
     items = []
     page = 1
     while page <= MAX_PAGES:
-        p = {"per_page": 100, "page": page}
+        p = {"per_page": PER_PAGE, "page": page}
         if extra_params:
             p.update(extra_params)
 
@@ -501,6 +502,12 @@ def paginated_get(platform, token, path, extra_params=None):
             # 二级评审 Issue #14: 非 list 响应时记录警告而非静默忽略
             logging.warning("Paginated GET returned non-list: %r", data)
             break
+
+        # 返回数量小于 per_page 说明已到最后一页，无需继续请求。
+        # 防止某些平台（如 Gitee）在超出最后一页后仍返回重复数据导致循环卡住。
+        if len(data) < PER_PAGE:
+            break
+
         page += 1
     else:
         logging.warning(
