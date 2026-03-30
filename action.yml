@@ -52,9 +52,21 @@ inputs:
     required: false
     default: 'all'
   show-private-repo-names:
-    description: 'Whether to show private repo names in logs (default: false). When false, private repo names are masked as [private].'
+    description: >
+      Controls how private repository names appear in logs (default: false).
+      false/no/none: mask as [private];
+      true/yes/full: show full name;
+      N (positive integer): show only the first N characters followed by '...'
+      (e.g. 3 → 'CSM...').
     required: false
     default: 'false'
+  git-timeout:
+    description: >
+      Timeout in seconds for individual git operations such as clone and push
+      (default: 1800). Increase this value for very large repositories or
+      slow/unreliable networks.
+    required: false
+    default: '1800'
 
 outputs:
   synced-count:

@@ -187,7 +187,8 @@ def get_gitee_repos(owner, token, account_type, include_private=True):
 # ===========================================================================
 
 
-def create_gitee_repo(owner, token, repo_name, private, description, account_type):
+def create_gitee_repo(owner, token, repo_name, private, description, account_type,
+                      log_repo_name=None):
     """在 Gitee 上创建仓库。
 
     根据 account_type 选择端点：
@@ -212,10 +213,14 @@ def create_gitee_repo(owner, token, repo_name, private, description, account_typ
         private: 是否私有。
         description: 仓库描述。
         account_type: 'user' 或 'org'。
+        log_repo_name: 日志中显示的仓库名（可选，默认与 repo_name 相同，
+            用于私有仓库名脱敏场景）。
 
     Returns:
         True 如果创建成功或仓库已存在，False 如果失败。
     """
+    if log_repo_name is None:
+        log_repo_name = repo_name
     if account_type == "org":
         url = f"{GITEE_API}/orgs/{owner}/repos"
     else:
@@ -234,15 +239,15 @@ def create_gitee_repo(owner, token, repo_name, private, description, account_typ
                        json=payload, max_retries=1)
 
     if resp.status_code in (200, 201):
-        logging.info(f"  Created Gitee repo: {repo_name}")
+        logging.info(f"  Created Gitee repo: {log_repo_name}")
         return True
     if resp.status_code == 422:
         # 422 通常表示仓库已存在
-        logging.info(f"  Gitee repo {repo_name} already exists, skip creation")
+        logging.info(f"  Gitee repo {log_repo_name} already exists, skip creation")
         return True
 
     logging.error(
-        f"  Failed to create Gitee repo {repo_name}: "
+        f"  Failed to create Gitee repo {log_repo_name}: "
         f"{resp.status_code} {sanitize_response_text(resp.text)}"
     )
     return False

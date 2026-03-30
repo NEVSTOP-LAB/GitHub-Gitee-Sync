@@ -183,8 +183,19 @@ def parse_args():
         "--show-private-repo-names",
         default=os.environ.get("SHOW_PRIVATE_REPO_NAMES", "false"),
         help=(
-            "Whether to show private repo names in logs "
-            "(default: false). When false, private repo names are masked."
+            "Controls how private repo names appear in logs "
+            "(default: false). "
+            "false/no/none: mask as [private]; "
+            "true/yes/full: show full name; "
+            "N (positive integer): show first N characters (e.g. 3 → 'CSM...')."
+        ),
+    )
+    parser.add_argument(
+        "--git-timeout",
+        default=os.environ.get("GIT_TIMEOUT", "1800"),
+        help=(
+            "Timeout in seconds for individual git operations "
+            "(default: 1800). Large repos may need a higher value."
         ),
     )
 
@@ -198,9 +209,39 @@ def parse_args():
         "true", "1", "yes",
     )
     args.dry_run = str(args.dry_run).lower() in ("true", "1", "yes")
-    args.show_private_repo_names = str(
-        args.show_private_repo_names
-    ).lower() in ("true", "1", "yes")
+
+    # --- show_private_repo_names: false | true | positive integer ---
+    _spn = str(args.show_private_repo_names).strip().lower()
+    if _spn in ("true", "yes", "full"):
+        args.show_private_repo_names = True
+    elif _spn in ("false", "no", "none"):
+        args.show_private_repo_names = False
+    else:
+        try:
+            _n = int(_spn)
+            args.show_private_repo_names = False if _n <= 0 else _n
+        except ValueError:
+            logging.warning(
+                f"Invalid show-private-repo-names value '{_spn}', "
+                f"defaulting to false (mask completely)."
+            )
+            args.show_private_repo_names = False
+
+    # --- git_timeout: parse as positive integer ---
+    try:
+        args.git_timeout = int(args.git_timeout)
+        if args.git_timeout <= 0:
+            logging.warning(
+                f"git-timeout must be a positive integer; "
+                f"defaulting to 1800."
+            )
+            args.git_timeout = 1800
+    except (ValueError, TypeError):
+        logging.warning(
+            f"Invalid git-timeout value '{args.git_timeout}', "
+            f"defaulting to 1800."
+        )
+        args.git_timeout = 1800
 
     # --- 逗号分隔列表解析 ---
     args.include_repos = set(
@@ -257,7 +298,8 @@ def sync_one_direction(source_platform, target_platform, source_owner,
                        dry_run=False,
                        source_username="git", target_username="git",
                        visibility="all",
-                       show_private_repo_names=False):
+                       show_private_repo_names=False,
+                       git_timeout=None):
     """执行单方向同步: 从 source 平台到 target 平台。
 
     对应需求: docs/计划/流程图.md — "主同步流程" 步骤 4-8
@@ -343,9 +385,16 @@ def sync_one_direction(source_platform, target_platform, source_owner,
 
     # --- 显示名称辅助: 根据 show_private_repo_names 决定是否脱敏 ---
     def _display_name(repo):
-        if repo.get("private", False) and not show_private_repo_names:
-            return "[private]"
-        return repo["name"]
+        if not repo.get("private", False):
+            return repo["name"]
+        name = repo["name"]
+        if show_private_repo_names is True:
+            return name
+        if show_private_repo_names is not False:
+            # Positive integer: show first N characters
+            n = show_private_repo_names
+            return name[:n] + "..." if len(name) > n else name
+        return "[private]"
 
     logging.info(f"Repos to sync: {len(source_repos)}")
 
@@ -413,6 +462,7 @@ def sync_one_direction(source_platform, target_platform, source_owner,
                         repo.get("private", False),
                         repo.get("description", ""),
                         account_type,
+                        log_repo_name=display_name,
                     )
                 else:
                     ok = create_gitee_repo(
@@ -420,6 +470,7 @@ def sync_one_direction(source_platform, target_platform, source_owner,
                         repo.get("private", False),
                         repo.get("description", ""),
                         account_type,
+                        log_repo_name=display_name,
                     )
 
                 if not ok:
@@ -447,6 +498,7 @@ def sync_one_direction(source_platform, target_platform, source_owner,
             source_username=source_username,
             target_username=target_username,
             log_repo_name=display_name,
+            git_timeout=git_timeout,
         )
 
         if result == "failed":
@@ -478,6 +530,7 @@ def sync_one_direction(source_platform, target_platform, source_owner,
                 source_username=source_username,
                 target_username=target_username,
                 log_repo_name=display_name,
+                git_timeout=git_timeout,
             )
 
         synced += 1
@@ -531,6 +584,7 @@ def sync_all(args):
             target_username=gitee_username,
             visibility=args.visibility,
             show_private_repo_names=args.show_private_repo_names,
+            git_timeout=args.git_timeout,
         )
         total_synced += s
         total_failed += f
@@ -557,6 +611,7 @@ def sync_all(args):
             target_username=github_username,
             visibility=args.visibility,
             show_private_repo_names=args.show_private_repo_names,
+            git_timeout=args.git_timeout,
         )
         total_synced += s
         total_failed += f

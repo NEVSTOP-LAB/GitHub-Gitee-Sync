@@ -200,6 +200,17 @@ class TestCreateGithubRepo:
             url = mock_req.call_args[0][1]
             assert "/user/repos" in url
 
+    def test_log_repo_name_used_in_log(self):
+        """log_repo_name overrides repo_name in log messages."""
+        with patch("lib.github_api.api_request",
+                   return_value=_make_resp({}, status=201)), \
+             patch("lib.github_api.logging.info") as mock_log:
+            create_github_repo("owner", "token", "real-name", False, "", "user",
+                               log_repo_name="[private]")
+        log_messages = " ".join(str(c) for c in mock_log.call_args_list)
+        assert "[private]" in log_messages
+        assert "real-name" not in log_messages
+
 
 # ===========================================================================
 # get_github_repo_details

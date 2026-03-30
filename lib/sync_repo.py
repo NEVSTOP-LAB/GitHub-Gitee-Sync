@@ -47,9 +47,12 @@ from .gitee_api import get_gitee_repo_details, update_gitee_repo_metadata
 # 常量
 # ===========================================================================
 
-# Git 操作超时时间: 10 分钟
-# 大型仓库 clone/push 可能需要较长时间
-GIT_TIMEOUT = 600
+# Git 操作超时时间: 默认 30 分钟
+# 大型仓库 clone/push 可能需要较长时间；可通过 GIT_TIMEOUT 环境变量覆盖
+GIT_TIMEOUT = int(os.environ.get("GIT_TIMEOUT", 1800))
+
+# git 超时后自动重试次数 (实际执行次数 = GIT_RETRIES + 1)
+GIT_RETRIES = 1
 
 # 释放资产下载的最大文件大小: 500MB
 # 超过此大小的资产将被跳过，防止内存溢出
@@ -65,7 +68,7 @@ SYNC_MARKER = "<!-- synced-from: {url} -->"
 # Git 增量同步
 # ===========================================================================
 
-def _refs_already_in_sync(temp_dir, target_url, tgt_env):
+def _refs_already_in_sync(temp_dir, target_url, tgt_env, git_timeout=None):
     """比较本地镜像的 refs 与目标仓库的 refs，判断是否可以跳过推送。
 
     只比较分支 (refs/heads/*) 和标签 (refs/tags/*)，因为这些是
@@ -79,10 +82,13 @@ def _refs_already_in_sync(temp_dir, target_url, tgt_env):
         temp_dir: 本地 --mirror 克隆目录路径。
         target_url: 目标仓库 URL（无凭据）。
         tgt_env: 目标仓库认证用的 git 环境变量（含 GIT_ASKPASS）。
+        git_timeout: git 操作超时时间（秒），默认使用模块级 GIT_TIMEOUT。
 
     Returns:
         True 如果两端 refs 完全一致，False 否则。
     """
+    if git_timeout is None:
+        git_timeout = GIT_TIMEOUT
     try:
         # 获取本地镜像的所有 refs
         show_ref = subprocess.run(
@@ -109,7 +115,7 @@ def _refs_already_in_sync(temp_dir, target_url, tgt_env):
             ["git", "ls-remote", "--heads", "--tags", target_url],
             capture_output=True,
             text=True,
-            timeout=GIT_TIMEOUT,
+            timeout=git_timeout,
             env=tgt_env,
         )
         if ls_remote.returncode != 0:
@@ -141,7 +147,7 @@ def _refs_already_in_sync(temp_dir, target_url, tgt_env):
 def mirror_sync(source_url, target_url, repo_name,
                 source_token, target_token, dry_run=False,
                 source_username="git", target_username="git",
-                log_repo_name=None):
+                log_repo_name=None, git_timeout=None):
     """执行 git clone --mirror + git push --all/--tags --force 完成代码同步。
 
     这是仓库同步的核心步骤。使用增量方式同步所有分支和标签，
@@ -152,6 +158,11 @@ def mirror_sync(source_url, target_url, repo_name,
     2. git push --all --force <target_url>           — 推送所有分支到目标
     3. git push --tags --force <target_url>          — 推送所有标签到目标
     4. 清理临时目录和 askpass 脚本
+
+    超时与重试:
+    - 每个 git 操作受 git_timeout 限制（默认 GIT_TIMEOUT 秒）。
+    - 超时后自动重试一次（共 GIT_RETRIES + 1 次尝试）。
+    - 所有重试均超时才返回 'failed'。
 
     安全策略:
     - 使用 --all + --tags 代替 --mirror 推送，确保不会删除目标仓库独有的
@@ -183,6 +194,7 @@ def mirror_sync(source_url, target_url, repo_name,
         target_username: 目标平台 Token 所有者的用户名（用于 HTTPS 认证）。
         log_repo_name: 日志中显示的仓库名（可选，默认与 repo_name 相同，
             用于私有仓库名脱敏场景）。
+        git_timeout: git 操作超时时间（秒），默认使用模块级 GIT_TIMEOUT。
 
     Returns:
         'success': 同步成功。
@@ -191,122 +203,133 @@ def mirror_sync(source_url, target_url, repo_name,
     """
     if log_repo_name is None:
         log_repo_name = repo_name
+    if git_timeout is None:
+        git_timeout = GIT_TIMEOUT
     if dry_run:
         logging.info(f"  [DRY-RUN] Would mirror sync {log_repo_name}")
         return "success"
 
-    temp_dir = tempfile.mkdtemp(prefix=f"sync_{repo_name}_")
-    askpass_paths = []
-    try:
-        # --- Step 1: git clone --mirror (使用 source_token 认证) ---
-        logging.info(f"  Cloning from source ...")
-        src_env, src_askpass = make_git_env(source_token, source_username)
-        askpass_paths.append(src_askpass)
-        result = subprocess.run(
-            ["git", "clone", "--mirror", source_url, temp_dir],
-            capture_output=True,
-            text=True,
-            timeout=GIT_TIMEOUT,
-            env=src_env,
-        )
+    for attempt in range(GIT_RETRIES + 1):
+        temp_dir = tempfile.mkdtemp(prefix=f"sync_{repo_name}_")
+        askpass_paths = []
+        try:
+            # --- Step 1: git clone --mirror (使用 source_token 认证) ---
+            logging.info(f"  Cloning from source ...")
+            src_env, src_askpass = make_git_env(source_token, source_username)
+            askpass_paths.append(src_askpass)
+            result = subprocess.run(
+                ["git", "clone", "--mirror", source_url, temp_dir],
+                capture_output=True,
+                text=True,
+                timeout=git_timeout,
+                env=src_env,
+            )
 
-        if result.returncode != 0:
-            stderr = result.stderr
-            # 空仓库检测: clone 会在 stderr 中包含 "empty repository" 警告
-            if "empty repository" in stderr.lower():
+            if result.returncode != 0:
+                stderr = result.stderr
+                # 空仓库检测: clone 会在 stderr 中包含 "empty repository" 警告
+                if "empty repository" in stderr.lower():
+                    logging.warning(
+                        f"  {log_repo_name} is an empty repository, skipping push"
+                    )
+                    return "empty"
+                logging.error(
+                    f"  git clone --mirror failed: {mask_token(stderr)}"
+                )
+                return "failed"
+
+            # 二次检查: clone 成功但 stderr 中有空仓库警告
+            if "empty repository" in (result.stderr or "").lower():
                 logging.warning(
                     f"  {log_repo_name} is an empty repository, skipping push"
                 )
                 return "empty"
-            logging.error(
-                f"  git clone --mirror failed: {mask_token(stderr)}"
+
+            # --- Step 1.5: 提前初始化目标认证环境，用于 refs 比较和推送 ---
+            tgt_env, tgt_askpass = make_git_env(target_token, target_username)
+            askpass_paths.append(tgt_askpass)
+
+            # --- Step 1.6: 检查两端 refs 是否完全一致，一致则跳过推送 ---
+            if _refs_already_in_sync(temp_dir, target_url, tgt_env, git_timeout):
+                logging.info(f"  Both sides already in sync, skipping push ⏭️")
+                return "success"
+
+            # --- Step 2: git push --all --force (推送所有分支，不删除目标独有分支) ---
+            logging.info(f"  Pushing branches to target ...")
+            result = subprocess.run(
+                ["git", "push", "--all", "--force", target_url],
+                cwd=temp_dir,
+                capture_output=True,
+                text=True,
+                timeout=git_timeout,
+                env=tgt_env,
             )
-            return "failed"
 
-        # 二次检查: clone 成功但 stderr 中有空仓库警告
-        if "empty repository" in (result.stderr or "").lower():
-            logging.warning(
-                f"  {log_repo_name} is an empty repository, skipping push"
+            if result.returncode != 0:
+                logging.error(
+                    f"  git push --all --force failed: "
+                    f"{mask_token(result.stderr)}"
+                )
+                return "failed"
+
+            # --- Step 3: git push --tags --force (推送所有标签，不删除目标独有标签) ---
+            logging.info(f"  Pushing tags to target ...")
+            result = subprocess.run(
+                ["git", "push", "--tags", "--force", target_url],
+                cwd=temp_dir,
+                capture_output=True,
+                text=True,
+                timeout=git_timeout,
+                env=tgt_env,
             )
-            return "empty"
 
-        # --- Step 1.5: 提前初始化目标认证环境，用于 refs 比较和推送 ---
-        tgt_env, tgt_askpass = make_git_env(target_token, target_username)
-        askpass_paths.append(tgt_askpass)
+            if result.returncode != 0:
+                logging.error(
+                    f"  git push --tags --force failed: "
+                    f"{mask_token(result.stderr)}"
+                )
+                return "failed"
 
-        # --- Step 1.6: 检查两端 refs 是否完全一致，一致则跳过推送 ---
-        if _refs_already_in_sync(temp_dir, target_url, tgt_env):
-            logging.info(f"  Both sides already in sync, skipping push ⏭️")
+            logging.info(f"  Mirror sync completed ✓")
             return "success"
 
-        # --- Step 2: git push --all --force (推送所有分支，不删除目标独有分支) ---
-        logging.info(f"  Pushing branches to target ...")
-        result = subprocess.run(
-            ["git", "push", "--all", "--force", target_url],
-            cwd=temp_dir,
-            capture_output=True,
-            text=True,
-            timeout=GIT_TIMEOUT,
-            env=tgt_env,
-        )
-
-        if result.returncode != 0:
-            logging.error(
-                f"  git push --all --force failed: "
-                f"{mask_token(result.stderr)}"
-            )
-            return "failed"
-
-        # --- Step 3: git push --tags --force (推送所有标签，不删除目标独有标签) ---
-        logging.info(f"  Pushing tags to target ...")
-        result = subprocess.run(
-            ["git", "push", "--tags", "--force", target_url],
-            cwd=temp_dir,
-            capture_output=True,
-            text=True,
-            timeout=GIT_TIMEOUT,
-            env=tgt_env,
-        )
-
-        if result.returncode != 0:
-            logging.error(
-                f"  git push --tags --force failed: "
-                f"{mask_token(result.stderr)}"
-            )
-            return "failed"
-
-        logging.info(f"  Mirror sync completed ✓")
-        return "success"
-
-    except subprocess.TimeoutExpired:
-        logging.error(f"  git operation timed out ({GIT_TIMEOUT}s)")
-        return "failed"
-    except Exception as e:
-        logging.error(f"  Mirror sync error: {mask_token(str(e))}")
-        return "failed"
-    finally:
-        # --- Step 4: 清理临时目录和 askpass 脚本 ---
-        # 确保临时文件被清理，即使发生异常
-        # 对应: 安全评审 — 防止敏感数据残留
-        try:
-            shutil.rmtree(temp_dir, ignore_errors=False)
+        except subprocess.TimeoutExpired:
+            if attempt < GIT_RETRIES:
+                logging.warning(
+                    f"  git operation timed out ({git_timeout}s), "
+                    f"retrying (attempt {attempt + 2}/{GIT_RETRIES + 1}) ..."
+                )
+            else:
+                logging.error(f"  git operation timed out ({git_timeout}s)")
+                return "failed"
         except Exception as e:
-            # 清理失败记录警告，但不影响返回结果
-            logging.warning(
-                f"  Failed to clean up temp directory {temp_dir}: {e}"
-            )
-
-        for p in askpass_paths:
+            logging.error(f"  Mirror sync error: {mask_token(str(e))}")
+            return "failed"
+        finally:
+            # --- Step 4: 清理临时目录和 askpass 脚本 ---
+            # 确保临时文件被清理，即使发生异常
+            # 对应: 安全评审 — 防止敏感数据残留
             try:
-                # 先尝试覆盖文件内容再删除，防止数据恢复
-                if os.path.exists(p):
-                    # 用零覆盖文件内容
-                    file_size = os.path.getsize(p)
-                    with open(p, 'wb') as f:
-                        f.write(b'\x00' * file_size)
-                    os.unlink(p)
-            except OSError as e:
-                logging.warning(f"  Failed to clean askpass script {p}: {e}")
+                shutil.rmtree(temp_dir, ignore_errors=False)
+            except Exception as e:
+                # 清理失败记录警告，但不影响返回结果
+                logging.warning(
+                    f"  Failed to clean up temp directory {temp_dir}: {e}"
+                )
+
+            for p in askpass_paths:
+                try:
+                    # 先尝试覆盖文件内容再删除，防止数据恢复
+                    if os.path.exists(p):
+                        # 用零覆盖文件内容
+                        file_size = os.path.getsize(p)
+                        with open(p, 'wb') as f:
+                            f.write(b'\x00' * file_size)
+                        os.unlink(p)
+                except OSError as e:
+                    logging.warning(f"  Failed to clean askpass script {p}: {e}")
+
+    return "failed"  # 所有重试均超时
 
 
 # ===========================================================================
@@ -739,7 +762,7 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
 def sync_wiki(source_platform, target_platform, source_owner, target_owner,
               source_token, target_token, repo_name, dry_run=False,
               source_username="git", target_username="git",
-              log_repo_name=None):
+              log_repo_name=None, git_timeout=None):
     """同步 Wiki（使用 git clone --mirror .wiki.git + git push --all/--tags --force）。
 
     Wiki 没有统一的 REST API（GitHub 完全不支持 Wiki REST API），
@@ -758,9 +781,12 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
     Args:
         dry_run: 如果为 True，跳过实际 git 操作。
         log_repo_name: 日志中显示的仓库名（可选，默认与 repo_name 相同）。
+        git_timeout: git 操作超时时间（秒），默认使用模块级 GIT_TIMEOUT。
     """
     if log_repo_name is None:
         log_repo_name = repo_name
+    if git_timeout is None:
+        git_timeout = GIT_TIMEOUT
     if dry_run:
         logging.info(f"  [DRY-RUN] Would sync wiki for {log_repo_name}")
         return
@@ -797,7 +823,7 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
             askpass_paths.append(src_askpass)
             result = subprocess.run(
                 ["git", "clone", "--mirror", source_url, temp_dir],
-                capture_output=True, text=True, timeout=GIT_TIMEOUT,
+                capture_output=True, text=True, timeout=git_timeout,
                 env=src_env,
             )
             if result.returncode != 0:
@@ -814,14 +840,14 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
             askpass_paths.append(tgt_askpass)
 
             # 检查两端 wiki refs 是否完全一致，一致则跳过推送
-            if _refs_already_in_sync(temp_dir, target_url, tgt_env):
+            if _refs_already_in_sync(temp_dir, target_url, tgt_env, git_timeout):
                 logging.info(f"  Wiki already in sync, skipping push ⏭️")
                 return
 
             push_result = subprocess.run(
                 ["git", "push", "--all", "--force", target_url],
                 cwd=temp_dir,
-                capture_output=True, text=True, timeout=GIT_TIMEOUT,
+                capture_output=True, text=True, timeout=git_timeout,
                 env=tgt_env,
             )
             if push_result.returncode != 0:
@@ -835,7 +861,7 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
                 tags_result = subprocess.run(
                     ["git", "push", "--tags", "--force", target_url],
                     cwd=temp_dir,
-                    capture_output=True, text=True, timeout=GIT_TIMEOUT,
+                    capture_output=True, text=True, timeout=git_timeout,
                     env=tgt_env,
                 )
                 if tags_result.returncode != 0:
@@ -1325,7 +1351,7 @@ def sync_extras(source_platform, target_platform, source_owner, target_owner,
                 source_token, target_token, repo_name, sync_extra,
                 dry_run=False,
                 source_username="git", target_username="git",
-                log_repo_name=None):
+                log_repo_name=None, git_timeout=None):
     """根据 sync_extra 参数调用对应的附属信息同步函数。
 
     对应需求: docs/计划/Python-脚本设计.md — sync_extra 参数
@@ -1337,6 +1363,7 @@ def sync_extras(source_platform, target_platform, source_owner, target_owner,
         source_username: 源平台 Token 所有者的用户名（用于 Wiki git 认证）。
         target_username: 目标平台 Token 所有者的用户名（用于 Wiki git 认证）。
         log_repo_name: 日志中显示的仓库名（可选，默认与 repo_name 相同）。
+        git_timeout: git 操作超时时间（秒），传递给 sync_wiki。
     """
     common_args = (
         source_platform, target_platform,
@@ -1354,7 +1381,8 @@ def sync_extras(source_platform, target_platform, source_owner, target_owner,
         sync_wiki(*common_args, dry_run=dry_run,
                   source_username=source_username,
                   target_username=target_username,
-                  log_repo_name=log_repo_name)
+                  log_repo_name=log_repo_name,
+                  git_timeout=git_timeout)
 
     if "labels" in sync_extra:
         logging.info(f"  Syncing labels ...")

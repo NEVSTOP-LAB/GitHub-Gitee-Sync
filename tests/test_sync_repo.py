@@ -170,6 +170,94 @@ class TestMirrorSync:
             )
         assert result == "failed"
 
+    def test_timeout_retries_once(self):
+        """On timeout mirror_sync retries once, logging a warning then an error."""
+        import lib.sync_repo as sr
+        orig_retries = sr.GIT_RETRIES
+        sr.GIT_RETRIES = 1
+        try:
+            warnings = []
+            errors = []
+            with patch("lib.sync_repo.subprocess.run",
+                       side_effect=subprocess.TimeoutExpired("git", 1800)), \
+                 patch("lib.sync_repo.make_git_env",
+                       return_value=({}, "/tmp/fake")), \
+                 patch("lib.sync_repo.shutil.rmtree"), \
+                 patch("lib.sync_repo.os.unlink"), \
+                 patch("lib.sync_repo.tempfile.mkdtemp", return_value="/tmp/testdir"), \
+                 patch("lib.sync_repo.logging.warning",
+                       side_effect=lambda msg, *a, **kw: warnings.append(str(msg))), \
+                 patch("lib.sync_repo.logging.error",
+                       side_effect=lambda msg, *a, **kw: errors.append(str(msg))):
+                result = mirror_sync(
+                    "https://github.com/src/repo.git",
+                    "https://gitee.com/tgt/repo.git",
+                    "repo",
+                    "src_token", "tgt_token",
+                )
+            assert result == "failed"
+            # Exactly one warning (retry message) and one error (final failure)
+            assert any("retrying" in w.lower() for w in warnings)
+            assert any("timed out" in e.lower() for e in errors)
+        finally:
+            sr.GIT_RETRIES = orig_retries
+
+    def test_timeout_succeeds_on_retry(self):
+        """If the first attempt times out but the second succeeds, returns success."""
+        import lib.sync_repo as sr
+        orig_retries = sr.GIT_RETRIES
+        sr.GIT_RETRIES = 1
+        try:
+            clone_ok = _make_process(returncode=0, stdout="", stderr="")
+            push_all_ok = _make_process(returncode=0)
+            push_tags_ok = _make_process(returncode=0)
+            # First call (clone, attempt 0) times out; subsequent calls succeed
+            with patch("lib.sync_repo.subprocess.run",
+                       side_effect=[
+                           subprocess.TimeoutExpired("git", 1800),
+                           clone_ok, push_all_ok, push_tags_ok,
+                       ]), \
+                 patch("lib.sync_repo.make_git_env",
+                       return_value=({}, "/tmp/fake")), \
+                 patch("lib.sync_repo.shutil.rmtree"), \
+                 patch("lib.sync_repo.os.unlink"), \
+                 patch("lib.sync_repo.tempfile.mkdtemp", return_value="/tmp/testdir"):
+                result = mirror_sync(
+                    "https://github.com/src/repo.git",
+                    "https://gitee.com/tgt/repo.git",
+                    "repo",
+                    "src_token", "tgt_token",
+                )
+            assert result == "success"
+        finally:
+            sr.GIT_RETRIES = orig_retries
+
+    def test_git_timeout_parameter_passed_to_subprocess(self):
+        """git_timeout parameter is used in subprocess calls."""
+        clone_proc = _make_process(returncode=0)
+        push_all_proc = _make_process(returncode=0)
+        push_tags_proc = _make_process(returncode=0)
+        with patch("lib.sync_repo.subprocess.run",
+                   side_effect=[clone_proc, push_all_proc, push_tags_proc]) as mock_run, \
+             patch("lib.sync_repo.make_git_env",
+                   return_value=({}, "/tmp/fake")), \
+             patch("lib.sync_repo.shutil.rmtree"), \
+             patch("lib.sync_repo.os.unlink"), \
+             patch("lib.sync_repo.tempfile.mkdtemp", return_value="/tmp/testdir"):
+            mirror_sync(
+                "https://github.com/src/repo.git",
+                "https://gitee.com/tgt/repo.git",
+                "repo",
+                "src_token", "tgt_token",
+                git_timeout=1200,
+            )
+        # At least one subprocess.run call should use timeout=1200
+        timeout_values = [
+            call.kwargs.get("timeout") for call in mock_run.call_args_list
+            if "timeout" in call.kwargs
+        ]
+        assert 1200 in timeout_values
+
     def test_askpass_scripts_cleaned_up_on_success(self):
         clone_proc = _make_process(returncode=0)
         push_all_proc = _make_process(returncode=0)

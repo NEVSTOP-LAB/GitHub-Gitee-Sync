@@ -198,6 +198,17 @@ class TestCreateGiteeRepo:
             _, kwargs = mock_req.call_args
             assert kwargs["headers"]["Authorization"] == "Bearer mytoken"
 
+    def test_log_repo_name_used_in_log(self):
+        """log_repo_name overrides repo_name in log messages."""
+        with patch("lib.gitee_api.api_request",
+                   return_value=_make_resp({}, status=201)), \
+             patch("lib.gitee_api.logging.info") as mock_log:
+            create_gitee_repo("owner", "token", "real-name", False, "", "user",
+                              log_repo_name="[private]")
+        log_messages = " ".join(str(c) for c in mock_log.call_args_list)
+        assert "[private]" in log_messages
+        assert "real-name" not in log_messages
+
 
 # ===========================================================================
 # get_gitee_repo_details
