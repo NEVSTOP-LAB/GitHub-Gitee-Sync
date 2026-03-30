@@ -699,6 +699,48 @@ class TestSyncLabels:
         method, url = mock_api.call_args[0]
         assert method == "POST"
 
+    def test_create_label_gitee_color_has_hash_prefix(self):
+        """Gitee label creation must send color with '#' prefix (required by Gitee API)."""
+        src_labels = [self._label("help wanted", color="008672")]
+        tgt_labels = []
+        mock_resp = _make_resp({}, status=201)
+        with patch("lib.sync_repo.paginated_get",
+                   side_effect=[src_labels, tgt_labels]), \
+             patch("lib.sync_repo.api_request",
+                   return_value=mock_resp) as mock_api:
+            sync_labels("github", "gitee", "src", "tgt",
+                        "tok1", "tok2", "repo")
+        _, kwargs = mock_api.call_args
+        assert kwargs["json"]["color"] == "#008672"
+
+    def test_create_label_github_color_no_hash_prefix(self):
+        """GitHub label creation must send color without '#' prefix."""
+        src_labels = [self._label("help wanted", color="008672")]
+        tgt_labels = []
+        mock_resp = _make_resp({}, status=201)
+        with patch("lib.sync_repo.paginated_get",
+                   side_effect=[src_labels, tgt_labels]), \
+             patch("lib.sync_repo.api_request",
+                   return_value=mock_resp) as mock_api:
+            sync_labels("gitee", "github", "src", "tgt",
+                        "tok1", "tok2", "repo")
+        _, kwargs = mock_api.call_args
+        assert kwargs["json"]["color"] == "008672"
+
+    def test_update_label_gitee_color_has_hash_prefix(self):
+        """Gitee label update must send color with '#' prefix (required by Gitee API)."""
+        src_labels = [self._label("bug", color="ff0000")]
+        tgt_labels = [self._label("bug", color="0000ff")]
+        mock_resp = _make_resp({}, status=200)
+        with patch("lib.sync_repo.paginated_get",
+                   side_effect=[src_labels, tgt_labels]), \
+             patch("lib.sync_repo.api_request",
+                   return_value=mock_resp) as mock_api:
+            sync_labels("github", "gitee", "src", "tgt",
+                        "tok1", "tok2", "repo")
+        _, kwargs = mock_api.call_args
+        assert kwargs["json"]["color"] == "#ff0000"
+
     def test_updates_label_when_color_differs(self):
         src_labels = [self._label("bug", color="ff0000")]
         tgt_labels = [self._label("bug", color="0000ff")]
