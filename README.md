@@ -99,6 +99,8 @@ docker run --rm --env-file .env github-gitee-sync
 | 创建不存在的仓库 | `CREATE_MISSING_REPOS` | `--create-missing-repos` | ❌ | `true` | 目标仓库不存在时是否自动创建 |
 | 附属信息同步 | `SYNC_EXTRA` | `--sync-extra` | ❌ | 空 | 逗号分隔：`releases,wiki,labels,milestones,issues` |
 | 干运行模式 | `DRY_RUN` | `--dry-run` | ❌ | `false` | 运行全部逻辑但不实际同步，用于调试和测试 |
+| 可见性过滤 | `VISIBILITY` | `--visibility` | ❌ | `all` | `all` / `public` / `private`，在 include/exclude 过滤之后再次按可见性过滤仓库 |
+| 显示私有仓库名 | `SHOW_PRIVATE_REPO_NAMES` | `--show-private-repo-names` | ❌ | `false` | 是否在日志中显示私有仓库名称，默认隐藏为 `[private]` |
 
 ---
 

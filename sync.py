@@ -84,6 +84,9 @@ def parse_args():
     │ --create-missing-repos│ CREATE_MISSING_REPOS │ ❌   │ true         │
     │ --sync-extra          │ SYNC_EXTRA           │ ❌   │ (空)         │
     │ --dry-run             │ DRY_RUN              │ ❌   │ false        │
+    │ --visibility          │ VISIBILITY           │ ❌   │ all          │
+    │ --show-private-repo-  │ SHOW_PRIVATE_REPO_   │ ❌   │ false        │
+    │   names               │   NAMES              │      │              │
     └───────────────────────┴──────────────────────┴──────┴──────────────┘
     """
     parser = argparse.ArgumentParser(
@@ -167,6 +170,23 @@ def parse_args():
             "(default: false). Useful for debugging and testing."
         ),
     )
+    parser.add_argument(
+        "--visibility",
+        default=os.environ.get("VISIBILITY", "all"),
+        choices=["all", "public", "private"],
+        help=(
+            "Filter repos by visibility: all, public, or private "
+            "(default: all). Applied after include/exclude filtering."
+        ),
+    )
+    parser.add_argument(
+        "--show-private-repo-names",
+        default=os.environ.get("SHOW_PRIVATE_REPO_NAMES", "false"),
+        help=(
+            "Whether to show private repo names in logs "
+            "(default: false). When false, private repo names are masked."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -178,6 +198,9 @@ def parse_args():
         "true", "1", "yes",
     )
     args.dry_run = str(args.dry_run).lower() in ("true", "1", "yes")
+    args.show_private_repo_names = str(
+        args.show_private_repo_names
+    ).lower() in ("true", "1", "yes")
 
     # --- 逗号分隔列表解析 ---
     args.include_repos = set(
@@ -232,7 +255,9 @@ def sync_one_direction(source_platform, target_platform, source_owner,
                        account_type, include_private, include_repos,
                        exclude_repos, create_missing_repos, sync_extra,
                        dry_run=False,
-                       source_username="git", target_username="git"):
+                       source_username="git", target_username="git",
+                       visibility="all",
+                       show_private_repo_names=False):
     """执行单方向同步: 从 source 平台到 target 平台。
 
     对应需求: docs/计划/流程图.md — "主同步流程" 步骤 4-8
@@ -297,6 +322,31 @@ def sync_one_direction(source_platform, target_platform, source_owner,
                 f"{', '.join(sorted(exclude_repos))}"
             )
 
+    # === 步骤 2b: 按可见性过滤仓库 ===
+    if visibility != "all":
+        before = len(source_repos)
+        if visibility == "public":
+            source_repos = [
+                r for r in source_repos if not r.get("private", False)
+            ]
+        elif visibility == "private":
+            source_repos = [
+                r for r in source_repos if r.get("private", False)
+            ]
+        filtered_count = before - len(source_repos)
+        if filtered_count > 0:
+            logging.info(
+                f"Visibility filter '{visibility}' applied: "
+                f"removed {filtered_count} repos, "
+                f"{len(source_repos)} remaining"
+            )
+
+    # --- 显示名称辅助: 根据 show_private_repo_names 决定是否脱敏 ---
+    def _display_name(repo):
+        if repo.get("private", False) and not show_private_repo_names:
+            return "[private]"
+        return repo["name"]
+
     logging.info(f"Repos to sync: {len(source_repos)}")
 
     if not source_repos:
@@ -325,18 +375,19 @@ def sync_one_direction(source_platform, target_platform, source_owner,
     total = len(source_repos)
     for idx, repo in enumerate(source_repos, 1):
         repo_name = repo["name"]
+        display_name = _display_name(repo)
 
         # --- 安全: 验证仓库名 ---
         # 对应: 安全评审 — 防止路径遍历和命令注入
         if not validate_repo_name(repo_name):
             logging.warning(
-                f"[{idx}/{total}] Skipping {repo_name}: "
+                f"[{idx}/{total}] Skipping {display_name}: "
                 f"invalid repository name (security check)"
             )
             skipped += 1
             continue
 
-        logging.info(f"[{idx}/{total}] Syncing {repo_name} ...")
+        logging.info(f"[{idx}/{total}] Syncing {display_name} ...")
 
         # --- Step A: 检查/创建目标仓库 ---
         # 对应: docs/计划/流程图.md — "检查目标仓库是否存在"
@@ -352,7 +403,7 @@ def sync_one_direction(source_platform, target_platform, source_owner,
             if dry_run:
                 logging.info(
                     f"  [DRY-RUN] Would create {target_platform} "
-                    f"repo: {repo_name}"
+                    f"repo: {display_name}"
                 )
             else:
                 # 在目标平台创建仓库
@@ -374,11 +425,11 @@ def sync_one_direction(source_platform, target_platform, source_owner,
                 if not ok:
                     logging.error(
                         f"  Failed to create target repo, "
-                        f"skipping {repo_name}"
+                        f"skipping {display_name}"
                     )
                     failed += 1
                     failed_repos.append(
-                        (repo_name, "Failed to create target repo")
+                        (display_name, "Failed to create target repo")
                     )
                     continue
 
@@ -395,11 +446,12 @@ def sync_one_direction(source_platform, target_platform, source_owner,
             source_token, target_token, dry_run,
             source_username=source_username,
             target_username=target_username,
+            log_repo_name=display_name,
         )
 
         if result == "failed":
             failed += 1
-            failed_repos.append((repo_name, "git mirror sync failed"))
+            failed_repos.append((display_name, "git mirror sync failed"))
             continue
         elif result == "empty":
             skipped += 1
@@ -412,6 +464,7 @@ def sync_one_direction(source_platform, target_platform, source_owner,
             source_owner, target_owner,
             source_token, target_token,
             repo_name, dry_run,
+            log_repo_name=display_name,
         )
 
         # --- Step D-H: 同步附属信息 (releases, wiki, labels, ...) ---
@@ -424,6 +477,7 @@ def sync_one_direction(source_platform, target_platform, source_owner,
                 repo_name, sync_extra, dry_run,
                 source_username=source_username,
                 target_username=target_username,
+                log_repo_name=display_name,
             )
 
         synced += 1
@@ -475,6 +529,8 @@ def sync_all(args):
             args.sync_extra, dry_run,
             source_username=github_username,
             target_username=gitee_username,
+            visibility=args.visibility,
+            show_private_repo_names=args.show_private_repo_names,
         )
         total_synced += s
         total_failed += f
@@ -499,6 +555,8 @@ def sync_all(args):
             args.sync_extra, dry_run,
             source_username=gitee_username,
             target_username=github_username,
+            visibility=args.visibility,
+            show_private_repo_names=args.show_private_repo_names,
         )
         total_synced += s
         total_failed += f

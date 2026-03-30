@@ -721,3 +721,98 @@ class TestSyncReleases:
             sync_releases("github", "gitee", "src", "tgt",
                           "tok1", "tok2", "repo")
         mock_api.assert_not_called()
+
+
+# ===========================================================================
+# log_repo_name masking — 验证 log_repo_name 在各函数中正确脱敏
+# ===========================================================================
+
+class TestLogRepoNameMasking:
+    """验证 log_repo_name 参数能防止私有仓库名泄露到日志中。"""
+
+    def test_mirror_sync_dry_run_uses_log_repo_name(self):
+        """mirror_sync dry-run 应使用 log_repo_name 而非 repo_name"""
+        with patch("lib.sync_repo.subprocess.run") as mock_run, \
+             patch("lib.sync_repo.logging.info") as mock_log:
+            mirror_sync(
+                "https://github.com/src/secret.git",
+                "https://gitee.com/tgt/secret.git",
+                "secret-repo",
+                "src_token", "tgt_token",
+                dry_run=True,
+                log_repo_name="[private]",
+            )
+        log_messages = " ".join(str(c) for c in mock_log.call_args_list)
+        assert "[private]" in log_messages
+        assert "secret-repo" not in log_messages
+
+    def test_mirror_sync_empty_repo_warning_uses_log_repo_name(self):
+        """空仓库 WARNING 应使用 log_repo_name 而非 repo_name"""
+        clone_proc = _make_process(
+            returncode=0,
+            stderr="warning: You appear to have cloned an empty repository",
+        )
+        with patch("lib.sync_repo.subprocess.run",
+                   return_value=clone_proc), \
+             patch("lib.sync_repo.make_git_env",
+                   return_value=({}, "/tmp/fake")), \
+             patch("lib.sync_repo.shutil.rmtree"), \
+             patch("lib.sync_repo.os.unlink"), \
+             patch("lib.sync_repo.tempfile.mkdtemp",
+                   return_value="/tmp/testdir"), \
+             patch("lib.sync_repo.logging.warning") as mock_warn:
+            result = mirror_sync(
+                "https://github.com/src/secret.git",
+                "https://gitee.com/tgt/secret.git",
+                "secret-repo",
+                "src_token", "tgt_token",
+                log_repo_name="[private]",
+            )
+        assert result == "empty"
+        warn_messages = " ".join(str(c) for c in mock_warn.call_args_list)
+        assert "[private]" in warn_messages
+        assert "secret-repo" not in warn_messages
+
+    def test_mirror_sync_defaults_log_repo_name_to_repo_name(self):
+        """log_repo_name 未指定时默认使用 repo_name"""
+        with patch("lib.sync_repo.subprocess.run") as mock_run, \
+             patch("lib.sync_repo.logging.info") as mock_log:
+            mirror_sync(
+                "https://github.com/src/repo.git",
+                "https://gitee.com/tgt/repo.git",
+                "my-repo",
+                "src_token", "tgt_token",
+                dry_run=True,
+            )
+        log_messages = " ".join(str(c) for c in mock_log.call_args_list)
+        assert "my-repo" in log_messages
+
+    def test_sync_wiki_dry_run_uses_log_repo_name(self):
+        """sync_wiki dry-run 应使用 log_repo_name 而非 repo_name"""
+        with patch("lib.sync_repo.subprocess.run") as mock_run, \
+             patch("lib.sync_repo.logging.info") as mock_log:
+            sync_wiki("github", "gitee", "src_owner", "tgt_owner",
+                      "src_token", "tgt_token", "secret-repo",
+                      dry_run=True, log_repo_name="[private]")
+        log_messages = " ".join(str(c) for c in mock_log.call_args_list)
+        assert "[private]" in log_messages
+        assert "secret-repo" not in log_messages
+
+    def test_sync_wiki_clone_failure_warning_uses_log_repo_name(self):
+        """Wiki clone 失败 WARNING 应使用 log_repo_name 而非 repo_name"""
+        clone_proc = _make_process(returncode=128, stderr="not found")
+        with patch("lib.sync_repo.subprocess.run",
+                   return_value=clone_proc), \
+             patch("lib.sync_repo.make_git_env",
+                   return_value=({}, "/tmp/fake")), \
+             patch("lib.sync_repo.shutil.rmtree"), \
+             patch("lib.sync_repo.os.unlink"), \
+             patch("lib.sync_repo.tempfile.mkdtemp",
+                   return_value="/tmp/wiki"), \
+             patch("lib.sync_repo.logging.warning") as mock_warn:
+            sync_wiki("github", "gitee", "src_owner", "tgt_owner",
+                      "src_token", "tgt_token", "secret-repo",
+                      log_repo_name="[private]")
+        warn_messages = " ".join(str(c) for c in mock_warn.call_args_list)
+        assert "[private]" in warn_messages
+        assert "secret-repo" not in warn_messages

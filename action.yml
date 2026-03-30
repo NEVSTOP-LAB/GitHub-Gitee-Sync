@@ -47,6 +47,14 @@ inputs:
     description: 'Run all logic without actual sync (for debugging/testing)'
     required: false
     default: 'false'
+  visibility:
+    description: 'Filter repos by visibility: all, public, or private (default: all). Applied after include/exclude filtering.'
+    required: false
+    default: 'all'
+  show-private-repo-names:
+    description: 'Whether to show private repo names in logs (default: false). When false, private repo names are masked as [private].'
+    required: false
+    default: 'false'
 
 outputs:
   synced-count:
