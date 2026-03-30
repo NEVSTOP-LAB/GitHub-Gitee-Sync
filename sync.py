@@ -566,8 +566,21 @@ def main():
         # --- 前置检查 ---
         # 对应: docs/计划/错误处理设计.md — "环境检查失败 → 立即退出(code=3)"
         check_git_installed()
-        args.github_username = validate_github_token(args.github_token)
-        args.gitee_username = validate_gitee_token(args.gitee_token)
+        github_username = validate_github_token(args.github_token)
+        if not github_username or github_username == "unknown":
+            raise ValueError(
+                "无法从 GitHub Token 中解析到有效的用户名 (login 字段缺失或为 'unknown')，"
+                "请检查 GITHUB_TOKEN 是否正确且具有足够权限。"
+            )
+        args.github_username = github_username
+
+        gitee_username = validate_gitee_token(args.gitee_token)
+        if not gitee_username or gitee_username == "unknown":
+            raise ValueError(
+                "无法从 Gitee Token 中解析到有效的用户名 (login 字段缺失或为 'unknown')，"
+                "请检查 GITEE_TOKEN 是否正确且具有足够权限。"
+            )
+        args.gitee_username = gitee_username
     except Exception as e:
         logging.error(f"[FATAL] {e}")
         sys.exit(3)
