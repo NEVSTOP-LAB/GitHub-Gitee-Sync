@@ -864,6 +864,19 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
             tgt_env, tgt_askpass = make_git_env(target_token, target_username)
             askpass_paths.append(tgt_askpass)
 
+            # 检查目标 Wiki 是否存在/可访问（ls-remote 失败说明目标未启用 Wiki）
+            tgt_check = subprocess.run(
+                ["git", "ls-remote", target_url],
+                capture_output=True, text=True, timeout=git_timeout,
+                env=tgt_env,
+            )
+            if tgt_check.returncode != 0:
+                logging.info(
+                    f"  Wiki not available on target for "
+                    f"{log_repo_name}, skipping"
+                )
+                return
+
             # 检查两端 wiki refs 是否完全一致，一致则跳过推送
             if _refs_already_in_sync(temp_dir, target_url, tgt_env, git_timeout):
                 logging.info(f"  Wiki already in sync, skipping push ⏭️")
