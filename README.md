@@ -252,4 +252,4 @@ docker run --rm --env-file .env github-gitee-sync
 
 ## License
 
-MIT
+[MIT](LICENSE)
