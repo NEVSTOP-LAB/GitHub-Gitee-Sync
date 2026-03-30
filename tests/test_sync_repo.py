@@ -955,6 +955,21 @@ class TestSyncReleases:
         payload = mock_api.call_args[1]["json"]
         assert payload["body"] == "v1.0.0"
 
+    def test_empty_body_remains_empty_when_target_is_github(self):
+        """When syncing to GitHub, empty source body should remain empty."""
+        src = self._release("v1.0.0", body="")
+        src["target_commitish"] = "main"
+        tgt_releases = []
+        mock_resp = _make_resp(self._release("v1.0.0"), status=201)
+        with patch("lib.sync_repo.paginated_get",
+                   side_effect=[[src], tgt_releases]), \
+             patch("lib.sync_repo.api_request",
+                   return_value=mock_resp) as mock_api:
+            sync_releases("gitee", "github", "src", "tgt",
+                          "tok1", "tok2", "repo")
+        payload = mock_api.call_args[1]["json"]
+        assert payload["body"] == ""
+
     def test_empty_target_commitish_omitted_from_payload(self):
         """When source release has no target_commitish, omit from payload."""
         src = self._release("v1.0.0", body="notes")

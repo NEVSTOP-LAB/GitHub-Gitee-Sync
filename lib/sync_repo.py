@@ -538,11 +538,15 @@ def sync_releases(source_platform, target_platform, source_owner, target_owner,
             payload = {
                 "tag_name": tag,
                 "name": src_rel.get("name") or tag,
-                "body": body or tag,
+                "body": body,
                 "prerelease": src_rel.get("prerelease", False),
             }
             if target_commitish:
                 payload["target_commitish"] = target_commitish
+            if target_platform == "gitee":
+                # Gitee API rejects empty body; fall back to tag name
+                if not payload["body"]:
+                    payload["body"] = tag
             if target_platform == "github":
                 payload["draft"] = src_rel.get("draft", False)
                 resp = api_request(
