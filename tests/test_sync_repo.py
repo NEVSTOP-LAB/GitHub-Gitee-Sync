@@ -509,8 +509,8 @@ class TestSyncWiki:
                       "src_token", "tgt_token", "repo", dry_run=True)
         mock_run.assert_not_called()
 
-    def test_warns_when_clone_fails(self):
-        """Wiki 不存在时（clone 失败）输出 warning 并跳过"""
+    def test_logs_info_when_clone_fails(self):
+        """Wiki 不存在时（clone 失败）输出 info 并跳过"""
         clone_proc = _make_process(returncode=128, stderr="not found")
         with patch("lib.sync_repo.subprocess.run",
                    return_value=clone_proc), \
@@ -519,10 +519,10 @@ class TestSyncWiki:
              patch("lib.sync_repo.shutil.rmtree"), \
              patch("lib.sync_repo.os.unlink"), \
              patch("lib.sync_repo.tempfile.mkdtemp", return_value="/tmp/wiki"), \
-             patch("lib.sync_repo.logging.warning") as mock_warn:
+             patch("lib.sync_repo.logging.info") as mock_info:
             sync_wiki("github", "gitee", "src_owner", "tgt_owner",
                       "src_token", "tgt_token", "repo")
-        assert any("Wiki not available" in str(c) for c in mock_warn.call_args_list)
+        assert any("Wiki not available" in str(c) for c in mock_info.call_args_list)
 
     def test_builds_wiki_url_correctly(self):
         clone_proc = _make_process(returncode=0)
@@ -896,8 +896,8 @@ class TestLogRepoNameMasking:
         assert "[private]" in log_messages
         assert "secret-repo" not in log_messages
 
-    def test_sync_wiki_clone_failure_warning_uses_log_repo_name(self):
-        """Wiki clone 失败 WARNING 应使用 log_repo_name 而非 repo_name"""
+    def test_sync_wiki_clone_failure_info_uses_log_repo_name(self):
+        """Wiki clone 失败 INFO 应使用 log_repo_name 而非 repo_name"""
         clone_proc = _make_process(returncode=128, stderr="not found")
         with patch("lib.sync_repo.subprocess.run",
                    return_value=clone_proc), \
@@ -907,10 +907,10 @@ class TestLogRepoNameMasking:
              patch("lib.sync_repo.os.unlink"), \
              patch("lib.sync_repo.tempfile.mkdtemp",
                    return_value="/tmp/wiki"), \
-             patch("lib.sync_repo.logging.warning") as mock_warn:
+             patch("lib.sync_repo.logging.info") as mock_info:
             sync_wiki("github", "gitee", "src_owner", "tgt_owner",
                       "src_token", "tgt_token", "secret-repo",
                       log_repo_name="[private]")
-        warn_messages = " ".join(str(c) for c in mock_warn.call_args_list)
-        assert "[private]" in warn_messages
-        assert "secret-repo" not in warn_messages
+        info_messages = " ".join(str(c) for c in mock_info.call_args_list)
+        assert "[private]" in info_messages
+        assert "secret-repo" not in info_messages

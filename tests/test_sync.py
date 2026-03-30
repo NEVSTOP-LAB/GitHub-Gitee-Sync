@@ -57,7 +57,7 @@ class TestParseArgs:
         assert args.sync_extra == set()
         assert args.visibility == "all"
         assert args.show_private_repo_names is False
-        assert args.git_timeout == 1800
+        assert args.git_timeout == 900
 
     def test_bool_conversion_true(self):
         for val in ("true", "True", "1", "yes"):
@@ -192,7 +192,7 @@ class TestParseArgs:
 
     def test_git_timeout_default(self):
         args = self._parse([])
-        assert args.git_timeout == 1800
+        assert args.git_timeout == 900
 
 
 # ===========================================================================
@@ -217,7 +217,7 @@ class TestSyncOneDirection:
             dry_run=False,
             visibility="all",
             show_private_repo_names=False,
-            git_timeout=1800,
+            git_timeout=900,
         )
         defaults.update(overrides)
         return defaults
@@ -639,7 +639,7 @@ class TestSyncAll:
             dry_run=dry_run,
             visibility="all",
             show_private_repo_names=False,
-            git_timeout=1800,
+            git_timeout=900,
         )
         return args
 

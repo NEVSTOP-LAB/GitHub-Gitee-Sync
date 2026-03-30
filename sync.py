@@ -192,10 +192,10 @@ def parse_args():
     )
     parser.add_argument(
         "--git-timeout",
-        default=os.environ.get("GIT_TIMEOUT", "1800"),
+        default=os.environ.get("GIT_TIMEOUT", "900"),
         help=(
             "Timeout in seconds for individual git operations "
-            "(default: 1800). Large repos may need a higher value."
+            "(default: 900). Large repos may need a higher value."
         ),
     )
 
@@ -233,15 +233,15 @@ def parse_args():
         if args.git_timeout <= 0:
             logging.warning(
                 f"git-timeout must be a positive integer; "
-                f"defaulting to 1800."
+                f"defaulting to 900."
             )
-            args.git_timeout = 1800
+            args.git_timeout = 900
     except (ValueError, TypeError):
         logging.warning(
             f"Invalid git-timeout value '{args.git_timeout}', "
-            f"defaulting to 1800."
+            f"defaulting to 900."
         )
-        args.git_timeout = 1800
+        args.git_timeout = 900
 
     # --- 逗号分隔列表解析 ---
     args.include_repos = set(
