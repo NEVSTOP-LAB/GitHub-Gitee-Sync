@@ -231,7 +231,8 @@ def sync_one_direction(source_platform, target_platform, source_owner,
                        target_owner, source_token, target_token,
                        account_type, include_private, include_repos,
                        exclude_repos, create_missing_repos, sync_extra,
-                       dry_run=False):
+                       dry_run=False,
+                       source_username="git", target_username="git"):
     """执行单方向同步: 从 source 平台到 target 平台。
 
     对应需求: docs/计划/流程图.md — "主同步流程" 步骤 4-8
@@ -392,6 +393,8 @@ def sync_one_direction(source_platform, target_platform, source_owner,
         result = mirror_sync(
             source_url, target_url, repo_name,
             source_token, target_token, dry_run,
+            source_username=source_username,
+            target_username=target_username,
         )
 
         if result == "failed":
@@ -419,6 +422,8 @@ def sync_one_direction(source_platform, target_platform, source_owner,
                 source_owner, target_owner,
                 source_token, target_token,
                 repo_name, sync_extra, dry_run,
+                source_username=source_username,
+                target_username=target_username,
             )
 
         synced += 1
@@ -440,6 +445,10 @@ def sync_all(args):
     """
     direction = args.direction
     dry_run = args.dry_run
+    # Token 所有者用户名由 main() 中的 validate_*_token() 设置到 args 上。
+    # 使用 getattr 防御性回退，确保测试等场景下不会因缺少属性而崩溃。
+    github_username = getattr(args, "github_username", "git")
+    gitee_username = getattr(args, "gitee_username", "git")
     total_synced = 0
     total_failed = 0
     total_skipped = 0
@@ -464,6 +473,8 @@ def sync_all(args):
             args.include_repos, args.exclude_repos,
             args.create_missing_repos,
             args.sync_extra, dry_run,
+            source_username=github_username,
+            target_username=gitee_username,
         )
         total_synced += s
         total_failed += f
@@ -486,6 +497,8 @@ def sync_all(args):
             args.include_repos, args.exclude_repos,
             args.create_missing_repos,
             args.sync_extra, dry_run,
+            source_username=gitee_username,
+            target_username=github_username,
         )
         total_synced += s
         total_failed += f
@@ -553,8 +566,21 @@ def main():
         # --- 前置检查 ---
         # 对应: docs/计划/错误处理设计.md — "环境检查失败 → 立即退出(code=3)"
         check_git_installed()
-        validate_github_token(args.github_token)
-        validate_gitee_token(args.gitee_token)
+        github_username = validate_github_token(args.github_token)
+        if not github_username or github_username == "unknown":
+            raise ValueError(
+                "无法从 GitHub Token 中解析到有效的用户名 (login 字段缺失或为 'unknown')，"
+                "请检查 GITHUB_TOKEN 是否正确且具有足够权限。"
+            )
+        args.github_username = github_username
+
+        gitee_username = validate_gitee_token(args.gitee_token)
+        if not gitee_username or gitee_username == "unknown":
+            raise ValueError(
+                "无法从 Gitee Token 中解析到有效的用户名 (login 字段缺失或为 'unknown')，"
+                "请检查 GITEE_TOKEN 是否正确且具有足够权限。"
+            )
+        args.gitee_username = gitee_username
     except Exception as e:
         logging.error(f"[FATAL] {e}")
         sys.exit(3)
