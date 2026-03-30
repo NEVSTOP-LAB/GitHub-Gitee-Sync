@@ -450,8 +450,12 @@ def gitee_headers(token):
 def paginated_get(platform, token, path, extra_params=None):
     """通用分页 GET 请求，兼容 GitHub 和 Gitee 平台。
 
-    遍历所有分页直到返回空列表。每页最多 100 条记录。
-    设有安全上限（500 页），防止异常 API 响应导致无限循环。
+    遍历所有分页，每页最多 100 条记录。终止条件（满足任一即停止）:
+    - 返回空列表（标准的分页结束信号）
+    - 返回数量小于 per_page（说明已到最后一页，同时可防止某些平台
+      如 Gitee 在超出最后一页后仍返回重复数据导致循环卡住）
+    - 非 200 响应或非 list 响应
+    - 达到安全上限（500 页），防止异常 API 响应导致无限循环
     对应: docs/调研/GitHub-API.md — "分页处理（per_page=100, page 递增）"
     对应: docs/调研/Gitee-API.md — "分页处理（per_page=100, page 递增）"
 
@@ -460,6 +464,7 @@ def paginated_get(platform, token, path, extra_params=None):
         token: 个人访问令牌。
         path: API 路径（如 "/repos/{owner}/{repo}/labels"）。
         extra_params: 额外查询参数（如 {"state": "all"}）。
+            注意: 如果通过 extra_params 覆盖 per_page，分页终止检查会使用实际请求的值。
 
     Returns:
         所有分页结果合并后的列表。
