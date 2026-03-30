@@ -38,6 +38,7 @@ from .utils import (
     make_git_env,
     mask_token,
     paginated_get,
+    sanitize_response_text,
 )
 from .github_api import get_github_repo_details, update_github_repo_metadata
 from .gitee_api import get_gitee_repo_details, update_gitee_repo_metadata
@@ -532,13 +533,16 @@ def sync_releases(source_platform, target_platform, source_owner, target_owner,
                 target_platform,
                 f"/repos/{target_owner}/{repo_name}/releases",
             )
+            body = src_rel.get("body") or ""
+            target_commitish = src_rel.get("target_commitish") or ""
             payload = {
                 "tag_name": tag,
                 "name": src_rel.get("name") or tag,
-                "body": src_rel.get("body") or "",
+                "body": body if body else tag,
                 "prerelease": src_rel.get("prerelease", False),
-                "target_commitish": src_rel.get("target_commitish", ""),
             }
+            if target_commitish:
+                payload["target_commitish"] = target_commitish
             if target_platform == "github":
                 payload["draft"] = src_rel.get("draft", False)
                 resp = api_request(
@@ -562,8 +566,10 @@ def sync_releases(source_platform, target_platform, source_owner, target_owner,
                     repo_name, src_rel, new_release, dry_run,
                 )
             else:
+                body_preview = sanitize_response_text(resp.text)
                 logging.warning(
-                    f"  Failed to create release {tag}: {resp.status_code}"
+                    f"  Failed to create release {tag}: "
+                    f"{resp.status_code} {body_preview}"
                 )
 
         if created or updated:
@@ -619,7 +625,11 @@ def _update_existing_release(target_platform, target_owner, target_token,
         )
 
     if resp.status_code not in (200, 201):
-        logging.warning(f"  Failed to update release {tag}: {resp.status_code}")
+        body_preview = sanitize_response_text(resp.text)
+        logging.warning(
+            f"  Failed to update release {tag}: "
+            f"{resp.status_code} {body_preview}"
+        )
 
 
 def _sync_release_assets(source_platform, target_platform, source_owner,
