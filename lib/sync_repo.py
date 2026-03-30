@@ -538,7 +538,7 @@ def sync_releases(source_platform, target_platform, source_owner, target_owner,
             payload = {
                 "tag_name": tag,
                 "name": src_rel.get("name") or tag,
-                "body": body if body else tag,
+                "body": body or tag,
                 "prerelease": src_rel.get("prerelease", False),
             }
             if target_commitish:
