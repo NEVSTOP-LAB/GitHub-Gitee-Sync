@@ -509,8 +509,8 @@ class TestSyncWiki:
                       "src_token", "tgt_token", "repo", dry_run=True)
         mock_run.assert_not_called()
 
-    def test_warns_when_clone_fails(self):
-        """Wiki 不存在时（clone 失败）输出 warning 并跳过"""
+    def test_logs_info_when_clone_fails(self):
+        """Wiki 不存在时（clone 失败）输出 info 并跳过"""
         clone_proc = _make_process(returncode=128, stderr="not found")
         with patch("lib.sync_repo.subprocess.run",
                    return_value=clone_proc), \
@@ -519,10 +519,10 @@ class TestSyncWiki:
              patch("lib.sync_repo.shutil.rmtree"), \
              patch("lib.sync_repo.os.unlink"), \
              patch("lib.sync_repo.tempfile.mkdtemp", return_value="/tmp/wiki"), \
-             patch("lib.sync_repo.logging.warning") as mock_warn:
+             patch("lib.sync_repo.logging.info") as mock_info:
             sync_wiki("github", "gitee", "src_owner", "tgt_owner",
                       "src_token", "tgt_token", "repo")
-        assert any("Wiki not available" in str(c) for c in mock_warn.call_args_list)
+        assert any("Wiki not available" in str(c) for c in mock_info.call_args_list)
 
     def test_builds_wiki_url_correctly(self):
         clone_proc = _make_process(returncode=0)
@@ -796,6 +796,22 @@ class TestSyncReleases:
         method, url = mock_api.call_args[0]
         assert method == "POST"
 
+    def test_create_release_includes_target_commitish(self):
+        """Payload sent to Gitee must include target_commitish from source."""
+        src = self._release("v2.0.0")
+        src["target_commitish"] = "main"
+        tgt_releases = []
+        mock_resp = _make_resp(self._release("v2.0.0"), status=201)
+        with patch("lib.sync_repo.paginated_get",
+                   side_effect=[[src], tgt_releases]), \
+             patch("lib.sync_repo.api_request",
+                   return_value=mock_resp) as mock_api:
+            sync_releases("github", "gitee", "src", "tgt",
+                          "tok1", "tok2", "repo")
+        mock_api.assert_called_once()
+        payload = mock_api.call_args[1]["json"]
+        assert payload["target_commitish"] == "main"
+
     def test_updates_existing_release_when_body_differs(self):
         src_releases = [self._release("v1.0.0", body="new release notes")]
         tgt_releases = [self._release("v1.0.0", body="old release notes")]
@@ -896,8 +912,8 @@ class TestLogRepoNameMasking:
         assert "[private]" in log_messages
         assert "secret-repo" not in log_messages
 
-    def test_sync_wiki_clone_failure_warning_uses_log_repo_name(self):
-        """Wiki clone 失败 WARNING 应使用 log_repo_name 而非 repo_name"""
+    def test_sync_wiki_clone_failure_info_uses_log_repo_name(self):
+        """Wiki clone 失败 INFO 应使用 log_repo_name 而非 repo_name"""
         clone_proc = _make_process(returncode=128, stderr="not found")
         with patch("lib.sync_repo.subprocess.run",
                    return_value=clone_proc), \
@@ -907,10 +923,10 @@ class TestLogRepoNameMasking:
              patch("lib.sync_repo.os.unlink"), \
              patch("lib.sync_repo.tempfile.mkdtemp",
                    return_value="/tmp/wiki"), \
-             patch("lib.sync_repo.logging.warning") as mock_warn:
+             patch("lib.sync_repo.logging.info") as mock_info:
             sync_wiki("github", "gitee", "src_owner", "tgt_owner",
                       "src_token", "tgt_token", "secret-repo",
                       log_repo_name="[private]")
-        warn_messages = " ".join(str(c) for c in mock_warn.call_args_list)
-        assert "[private]" in warn_messages
-        assert "secret-repo" not in warn_messages
+        info_messages = " ".join(str(c) for c in mock_info.call_args_list)
+        assert "[private]" in info_messages
+        assert "secret-repo" not in info_messages

@@ -47,11 +47,11 @@ from .gitee_api import get_gitee_repo_details, update_gitee_repo_metadata
 # 常量
 # ===========================================================================
 
-# Git 操作超时时间: 默认 30 分钟
+# Git 操作超时时间: 默认 15 分钟
 # 大型仓库 clone/push 可能需要较长时间；可通过 GIT_TIMEOUT 环境变量覆盖
 _raw_git_timeout = os.environ.get("GIT_TIMEOUT")
 if _raw_git_timeout is None:
-    GIT_TIMEOUT = 1800
+    GIT_TIMEOUT = 900
 else:
     try:
         _parsed_timeout = int(_raw_git_timeout)
@@ -60,10 +60,10 @@ else:
         GIT_TIMEOUT = _parsed_timeout
     except (TypeError, ValueError):
         logging.warning(
-            "Invalid GIT_TIMEOUT value %r; falling back to default 1800 seconds",
+            "Invalid GIT_TIMEOUT value %r; falling back to default 900 seconds",
             _raw_git_timeout,
         )
-        GIT_TIMEOUT = 1800
+        GIT_TIMEOUT = 900
 
 # git 超时后自动重试次数 (实际执行次数 = GIT_RETRIES + 1)
 GIT_RETRIES = 1
@@ -528,6 +528,7 @@ def sync_releases(source_platform, target_platform, source_owner, target_owner,
                 "name": src_rel.get("name") or tag,
                 "body": src_rel.get("body") or "",
                 "prerelease": src_rel.get("prerelease", False),
+                "target_commitish": src_rel.get("target_commitish", ""),
             }
             if target_platform == "github":
                 payload["draft"] = src_rel.get("draft", False)
@@ -844,11 +845,9 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
                 env=src_env,
             )
             if result.returncode != 0:
-                # Wiki clone 失败 — 可能源仓库未启用 Wiki
-                # 二级评审 Issue #8: 从 debug 改为 warning，让用户知道 Wiki 未被同步
-                logging.warning(
-                    f"  Wiki not available for {log_repo_name}, skipping "
-                    f"(ensure Wiki is enabled on source repo)"
+                # Wiki clone 失败 — 可能源仓库未启用 Wiki，属于正常现象
+                logging.info(
+                    f"  Wiki not available for {log_repo_name}, skipping"
                 )
                 return
 

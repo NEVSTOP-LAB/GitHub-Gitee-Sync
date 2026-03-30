@@ -63,10 +63,10 @@ inputs:
   git-timeout:
     description: >
       Timeout in seconds for individual git operations such as clone and push
-      (default: 1800). Increase this value for very large repositories or
+      (default: 900). Increase this value for very large repositories or
       slow/unreliable networks.
     required: false
-    default: '1800'
+    default: '900'
 
 outputs:
   synced-count:
