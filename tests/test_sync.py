@@ -466,6 +466,58 @@ class TestSyncOneDirection:
         assert failed == 1
         assert failed_repos[0][0] == "[private]"
 
+    def test_log_repo_name_passed_to_mirror_sync(self):
+        """mirror_sync receives log_repo_name=[private] for private repos"""
+        src_repos = [{"name": "secret-repo", "private": True}]
+        tgt_repos = [{"name": "secret-repo"}]
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.mirror_sync", return_value="success") as mock_ms, \
+             patch("sync.sync_repo_metadata"):
+            sync_one_direction(
+                **self._common_kwargs(show_private_repo_names=False)
+            )
+        assert mock_ms.call_count == 1
+        _, kwargs = mock_ms.call_args
+        assert kwargs["log_repo_name"] == "[private]"
+
+    def test_log_repo_name_passed_to_sync_repo_metadata(self):
+        """sync_repo_metadata receives log_repo_name=[private] for private repos"""
+        src_repos = [{"name": "secret-repo", "private": True}]
+        tgt_repos = [{"name": "secret-repo"}]
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.mirror_sync", return_value="success"), \
+             patch("sync.sync_repo_metadata") as mock_meta:
+            sync_one_direction(
+                **self._common_kwargs(show_private_repo_names=False)
+            )
+        assert mock_meta.call_count == 1
+        _, kwargs = mock_meta.call_args
+        assert kwargs["log_repo_name"] == "[private]"
+
+    def test_log_repo_name_passed_to_sync_extras(self):
+        """sync_extras receives log_repo_name=[private] for private repos"""
+        src_repos = [{"name": "secret-repo", "private": True}]
+        tgt_repos = [{"name": "secret-repo"}]
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.mirror_sync", return_value="success"), \
+             patch("sync.sync_repo_metadata"), \
+             patch("sync.sync_extras") as mock_extras:
+            sync_one_direction(
+                **self._common_kwargs(
+                    show_private_repo_names=False,
+                    sync_extra={"labels"},
+                )
+            )
+        assert mock_extras.call_count == 1
+        _, kwargs = mock_extras.call_args
+        assert kwargs["log_repo_name"] == "[private]"
+
 
 # ===========================================================================
 # sync_all — exit codes

@@ -446,6 +446,7 @@ def sync_one_direction(source_platform, target_platform, source_owner,
             source_token, target_token, dry_run,
             source_username=source_username,
             target_username=target_username,
+            log_repo_name=display_name,
         )
 
         if result == "failed":
@@ -463,6 +464,7 @@ def sync_one_direction(source_platform, target_platform, source_owner,
             source_owner, target_owner,
             source_token, target_token,
             repo_name, dry_run,
+            log_repo_name=display_name,
         )
 
         # --- Step D-H: 同步附属信息 (releases, wiki, labels, ...) ---
@@ -475,6 +477,7 @@ def sync_one_direction(source_platform, target_platform, source_owner,
                 repo_name, sync_extra, dry_run,
                 source_username=source_username,
                 target_username=target_username,
+                log_repo_name=display_name,
             )
 
         synced += 1

@@ -68,7 +68,8 @@ SYNC_MARKER = "<!-- synced-from: {url} -->"
 
 def mirror_sync(source_url, target_url, repo_name,
                 source_token, target_token, dry_run=False,
-                source_username="git", target_username="git"):
+                source_username="git", target_username="git",
+                log_repo_name=None):
     """执行 git clone --mirror + git push --all/--tags --force 完成代码同步。
 
     这是仓库同步的核心步骤。使用增量方式同步所有分支和标签，
@@ -108,14 +109,18 @@ def mirror_sync(source_url, target_url, repo_name,
         dry_run: 如果为 True，跳过实际 git 操作。
         source_username: 源平台 Token 所有者的用户名（用于 HTTPS 认证）。
         target_username: 目标平台 Token 所有者的用户名（用于 HTTPS 认证）。
+        log_repo_name: 日志中显示的仓库名（可选，默认与 repo_name 相同，
+            用于私有仓库名脱敏场景）。
 
     Returns:
         'success': 同步成功。
         'empty': 源仓库为空，跳过推送。
         'failed': 同步失败。
     """
+    if log_repo_name is None:
+        log_repo_name = repo_name
     if dry_run:
-        logging.info(f"  [DRY-RUN] Would mirror sync {repo_name}")
+        logging.info(f"  [DRY-RUN] Would mirror sync {log_repo_name}")
         return "success"
 
     temp_dir = tempfile.mkdtemp(prefix=f"sync_{repo_name}_")
@@ -138,7 +143,7 @@ def mirror_sync(source_url, target_url, repo_name,
             # 空仓库检测: clone 会在 stderr 中包含 "empty repository" 警告
             if "empty repository" in stderr.lower():
                 logging.warning(
-                    f"  {repo_name} is an empty repository, skipping push"
+                    f"  {log_repo_name} is an empty repository, skipping push"
                 )
                 return "empty"
             logging.error(
@@ -149,7 +154,7 @@ def mirror_sync(source_url, target_url, repo_name,
         # 二次检查: clone 成功但 stderr 中有空仓库警告
         if "empty repository" in (result.stderr or "").lower():
             logging.warning(
-                f"  {repo_name} is an empty repository, skipping push"
+                f"  {log_repo_name} is an empty repository, skipping push"
             )
             return "empty"
 
@@ -232,7 +237,7 @@ def mirror_sync(source_url, target_url, repo_name,
 
 def sync_repo_metadata(source_platform, target_platform, source_owner,
                        target_owner, source_token, target_token, repo_name,
-                       dry_run=False):
+                       dry_run=False, log_repo_name=None):
     """同步仓库元信息（description, homepage）。
 
     流程:
@@ -254,7 +259,10 @@ def sync_repo_metadata(source_platform, target_platform, source_owner,
         target_token: 目标平台 Token。
         repo_name: 仓库名。
         dry_run: 如果为 True，跳过实际更新操作。
+        log_repo_name: 日志中显示的仓库名（可选，默认与 repo_name 相同）。
     """
+    if log_repo_name is None:
+        log_repo_name = repo_name
     try:
         # --- 获取源仓库详情 ---
         if source_platform == "github":
@@ -651,7 +659,8 @@ def _sync_release_assets(source_platform, target_platform, source_owner,
 
 def sync_wiki(source_platform, target_platform, source_owner, target_owner,
               source_token, target_token, repo_name, dry_run=False,
-              source_username="git", target_username="git"):
+              source_username="git", target_username="git",
+              log_repo_name=None):
     """同步 Wiki（使用 git clone --mirror .wiki.git + git push --all/--tags --force）。
 
     Wiki 没有统一的 REST API（GitHub 完全不支持 Wiki REST API），
@@ -669,9 +678,12 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
 
     Args:
         dry_run: 如果为 True，跳过实际 git 操作。
+        log_repo_name: 日志中显示的仓库名（可选，默认与 repo_name 相同）。
     """
+    if log_repo_name is None:
+        log_repo_name = repo_name
     if dry_run:
-        logging.info(f"  [DRY-RUN] Would sync wiki for {repo_name}")
+        logging.info(f"  [DRY-RUN] Would sync wiki for {log_repo_name}")
         return
 
     askpass_paths = []
@@ -713,7 +725,7 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
                 # Wiki clone 失败 — 可能源仓库未启用 Wiki
                 # 二级评审 Issue #8: 从 debug 改为 warning，让用户知道 Wiki 未被同步
                 logging.warning(
-                    f"  Wiki not available for {repo_name}, skipping "
+                    f"  Wiki not available for {log_repo_name}, skipping "
                     f"(ensure Wiki is enabled on source repo)"
                 )
                 return
@@ -1227,7 +1239,8 @@ def _sync_issue_comments(source_platform, target_platform, source_owner,
 def sync_extras(source_platform, target_platform, source_owner, target_owner,
                 source_token, target_token, repo_name, sync_extra,
                 dry_run=False,
-                source_username="git", target_username="git"):
+                source_username="git", target_username="git",
+                log_repo_name=None):
     """根据 sync_extra 参数调用对应的附属信息同步函数。
 
     对应需求: docs/计划/Python-脚本设计.md — sync_extra 参数
@@ -1238,6 +1251,7 @@ def sync_extras(source_platform, target_platform, source_owner, target_owner,
         dry_run: 如果为 True，所有子功能均以 dry-run 模式运行。
         source_username: 源平台 Token 所有者的用户名（用于 Wiki git 认证）。
         target_username: 目标平台 Token 所有者的用户名（用于 Wiki git 认证）。
+        log_repo_name: 日志中显示的仓库名（可选，默认与 repo_name 相同）。
     """
     common_args = (
         source_platform, target_platform,
@@ -1254,7 +1268,8 @@ def sync_extras(source_platform, target_platform, source_owner, target_owner,
         logging.info(f"  Syncing wiki ...")
         sync_wiki(*common_args, dry_run=dry_run,
                   source_username=source_username,
-                  target_username=target_username)
+                  target_username=target_username,
+                  log_repo_name=log_repo_name)
 
     if "labels" in sync_extra:
         logging.info(f"  Syncing labels ...")
