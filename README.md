@@ -85,23 +85,23 @@ docker run --rm --env-file .env github-gitee-sync
 
 ## 参数说明
 
-| 参数 | 环境变量 | CLI 参数 | 必填 | 默认值 | 说明 |
-|------|---------|---------|------|--------|------|
-| GitHub 账号 | `GITHUB_OWNER` | `--github-owner` | ✅ | - | GitHub 用户名或组织名 |
-| GitHub Token | `GITHUB_TOKEN` | `--github-token` | ✅ | - | GitHub Personal Access Token |
-| Gitee 账号 | `GITEE_OWNER` | `--gitee-owner` | ✅ | - | Gitee 用户名或组织名 |
-| Gitee Token | `GITEE_TOKEN` | `--gitee-token` | ✅ | - | Gitee Personal Access Token |
-| 账号类型 | `ACCOUNT_TYPE` | `--account-type` | ❌ | `user` | `user`（个人）或 `org`（组织），同时应用于 GitHub 和 Gitee 两侧 |
-| 包含私有仓库 | `INCLUDE_PRIVATE` | `--include-private` | ❌ | `true` | 是否同步私有仓库 |
-| 指定仓库（允许列表） | `INCLUDE_REPOS` | `--include-repos` | ❌ | 空 | 逗号分隔的仓库名列表；设置后**仅同步**这些仓库，优先于排除列表 |
-| 排除仓库 | `EXCLUDE_REPOS` | `--exclude-repos` | ❌ | 空 | 逗号分隔的仓库名列表；当 `include-repos` 已设置时此参数被忽略 |
-| 同步方向 | `SYNC_DIRECTION` | `--direction` | ❌ | `github2gitee` | `github2gitee` / `gitee2github` / `both` |
-| 创建不存在的仓库 | `CREATE_MISSING_REPOS` | `--create-missing-repos` | ❌ | `true` | 目标仓库不存在时是否自动创建 |
-| 附属信息同步 | `SYNC_EXTRA` | `--sync-extra` | ❌ | 空 | 逗号分隔：`releases,wiki,labels,milestones,issues` |
-| 干运行模式 | `DRY_RUN` | `--dry-run` | ❌ | `false` | 运行全部逻辑但不实际同步，用于调试和测试 |
-| 可见性过滤 | `VISIBILITY` | `--visibility` | ❌ | `all` | `all` / `public` / `private`，在 include/exclude 过滤之后再次按可见性过滤仓库 |
-| 显示私有仓库名 | `SHOW_PRIVATE_REPO_NAMES` | `--show-private-repo-names` | ❌ | `false` | 日志中私有仓库名的显示方式：`false` 隐藏为 `[private]`；`true` 显示完整名称；正整数 N 显示前 N 个字符（如 `3` → `[CSM****]`） |
-| Git 超时时间 | `GIT_TIMEOUT` | `--git-timeout` | ❌ | `1800` | 单次 git 操作的超时秒数（默认 30 分钟）；超时后自动重试一次 |
+| 参数 & 环境变量 | CLI 参数 | 必填 | 默认值 | 说明 |
+|---------------|---------|------|--------|------|
+| GitHub 账号 <br/> `GITHUB_OWNER` | `--github-owner` | ✅ | - | GitHub 用户名或组织名 |
+| GitHub Token <br/> `GITHUB_TOKEN` | `--github-token` | ✅ | - | GitHub Personal Access Token |
+| Gitee 账号 <br/> `GITEE_OWNER` | `--gitee-owner` | ✅ | - | Gitee 用户名或组织名 |
+| Gitee Token <br/> `GITEE_TOKEN` | `--gitee-token` | ✅ | - | Gitee Personal Access Token |
+| 账号类型 <br/> `ACCOUNT_TYPE` | `--account-type` | ❌ | `user` | `user`（个人）或 `org`（组织），同时应用于 GitHub 和 Gitee 两侧 |
+| 包含私有仓库 <br/> `INCLUDE_PRIVATE` | `--include-private` | ❌ | `true` | 是否同步私有仓库 |
+| 指定仓库（允许列表） <br/> `INCLUDE_REPOS` | `--include-repos` | ❌ | 空 | 逗号分隔的仓库名列表；设置后**仅同步**这些仓库，优先于排除列表 |
+| 排除仓库 <br/> `EXCLUDE_REPOS` | `--exclude-repos` | ❌ | 空 | 逗号分隔的仓库名列表；当 `include-repos` 已设置时此参数被忽略 |
+| 同步方向 <br/> `SYNC_DIRECTION` | `--direction` | ❌ | `github2gitee` | `github2gitee` / `gitee2github` / `both` |
+| 创建不存在的仓库 <br/> `CREATE_MISSING_REPOS` | `--create-missing-repos` | ❌ | `true` | 目标仓库不存在时是否自动创建 |
+| 附属信息同步 <br/> `SYNC_EXTRA` | `--sync-extra` | ❌ | 空 | 逗号分隔：`releases,wiki,labels,milestones,issues` |
+| 干运行模式 <br/> `DRY_RUN` | `--dry-run` | ❌ | `false` | 运行全部逻辑但不实际同步，用于调试和测试 |
+| 可见性过滤 <br/> `VISIBILITY` | `--visibility` | ❌ | `all` | `all` / `public` / `private`，在 include/exclude 过滤之后再次按可见性过滤仓库 |
+| 显示私有仓库名 <br/> `SHOW_PRIVATE_REPO_NAMES` | `--show-private-repo-names` | ❌ | `false` | 日志中私有仓库名的显示方式：`false` 隐藏为 `[private]`；`true` 显示完整名称；正整数 N 显示前 N 个字符（如 `3` → `[CSM****]`） |
+| Git 超时时间 <br/> `GIT_TIMEOUT` | `--git-timeout` | ❌ | `1800` | 单次 git 操作的超时秒数（默认 30 分钟）；超时后自动重试一次 |
 
 ---
 
