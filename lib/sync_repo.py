@@ -65,6 +65,78 @@ SYNC_MARKER = "<!-- synced-from: {url} -->"
 # Git 增量同步
 # ===========================================================================
 
+def _refs_already_in_sync(temp_dir, target_url, tgt_env):
+    """比较本地镜像的 refs 与目标仓库的 refs，判断是否可以跳过推送。
+
+    只比较分支 (refs/heads/*) 和标签 (refs/tags/*)，因为这些是
+    git push --all 和 git push --tags 会推送的内容。
+
+    如果源和目标的所有分支和标签完全一致，返回 True（可以跳过推送）；
+    否则返回 False（需要推送）。任何错误（超时、网络问题等）均返回 False，
+    确保降级到正常推送流程。
+
+    Args:
+        temp_dir: 本地 --mirror 克隆目录路径。
+        target_url: 目标仓库 URL（无凭据）。
+        tgt_env: 目标仓库认证用的 git 环境变量（含 GIT_ASKPASS）。
+
+    Returns:
+        True 如果两端 refs 完全一致，False 否则。
+    """
+    try:
+        # 获取本地镜像的所有 refs
+        show_ref = subprocess.run(
+            ["git", "show-ref"],
+            cwd=temp_dir,
+            capture_output=True,
+            text=True,
+        )
+        if show_ref.returncode != 0:
+            return False
+
+        src_refs = {}
+        for line in show_ref.stdout.strip().splitlines():
+            if line:
+                parts = line.split(" ", 1)
+                if len(parts) == 2:
+                    src_refs[parts[1]] = parts[0]
+
+        src_branches = {k: v for k, v in src_refs.items() if k.startswith("refs/heads/")}
+        src_tags = {k: v for k, v in src_refs.items() if k.startswith("refs/tags/")}
+
+        # 获取目标仓库的 refs
+        ls_remote = subprocess.run(
+            ["git", "ls-remote", "--heads", "--tags", target_url],
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT,
+            env=tgt_env,
+        )
+        if ls_remote.returncode != 0:
+            return False
+
+        tgt_refs = {}
+        for line in ls_remote.stdout.strip().splitlines():
+            if line:
+                parts = line.split("\t", 1)
+                # 跳过 "^{}" 形式的 annotated tag peeled refs
+                if len(parts) == 2 and not parts[1].endswith("^{}"):
+                    tgt_refs[parts[1]] = parts[0]
+
+        tgt_branches = {k: v for k, v in tgt_refs.items() if k.startswith("refs/heads/")}
+        tgt_tags = {k: v for k, v in tgt_refs.items() if k.startswith("refs/tags/")}
+
+        return (
+            all(tgt_branches.get(k) == v for k, v in src_branches.items())
+            and all(tgt_tags.get(k) == v for k, v in src_tags.items())
+        )
+
+    except subprocess.TimeoutExpired:
+        return False
+    except Exception:
+        return False
+
+
 
 def mirror_sync(source_url, target_url, repo_name,
                 source_token, target_token, dry_run=False,
@@ -153,10 +225,17 @@ def mirror_sync(source_url, target_url, repo_name,
             )
             return "empty"
 
-        # --- Step 2: git push --all --force (推送所有分支，不删除目标独有分支) ---
-        logging.info(f"  Pushing branches to target ...")
+        # --- Step 1.5: 提前初始化目标认证环境，用于 refs 比较和推送 ---
         tgt_env, tgt_askpass = make_git_env(target_token, target_username)
         askpass_paths.append(tgt_askpass)
+
+        # --- Step 1.6: 检查两端 refs 是否完全一致，一致则跳过推送 ---
+        if _refs_already_in_sync(temp_dir, target_url, tgt_env):
+            logging.info(f"  Both sides already in sync, skipping push ⏭️")
+            return "success"
+
+        # --- Step 2: git push --all --force (推送所有分支，不删除目标独有分支) ---
+        logging.info(f"  Pushing branches to target ...")
         result = subprocess.run(
             ["git", "push", "--all", "--force", target_url],
             cwd=temp_dir,
