@@ -56,8 +56,8 @@ inputs:
       Controls how private repository names appear in logs (default: false).
       false/no/none: mask as [private];
       true/yes/full: show full name;
-      N (positive integer): show only the first N characters followed by '...'
-      (e.g. 3 → 'CSM...').
+      N (positive integer): show only the first N characters followed by '****'
+      wrapped in brackets (e.g. 3 → '[CSM****]').
     required: false
     default: 'false'
   git-timeout:

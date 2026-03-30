@@ -550,7 +550,7 @@ class TestSyncOneDirection:
         assert kwargs["log_repo_name"] == "[private]"
 
     def test_show_private_repo_names_int_shows_prefix_in_log(self):
-        """show_private_repo_names=3 shows first 3 chars + '...' in logs"""
+        """show_private_repo_names=3 shows first 3 chars wrapped in [****] in logs"""
         src_repos = [{"name": "secret-repo", "private": True}]
         tgt_repos = [{"name": "secret-repo"}]
 
@@ -563,12 +563,12 @@ class TestSyncOneDirection:
                 **self._common_kwargs(show_private_repo_names=3)
             )
         log_messages = " ".join(str(c) for c in mock_log.call_args_list)
-        assert "sec..." in log_messages
+        assert "[sec****]" in log_messages
         assert "secret-repo" not in log_messages
         assert "[private]" not in log_messages
 
     def test_show_private_repo_names_int_no_ellipsis_when_short(self):
-        """show_private_repo_names=N >= len(name) shows full name without '...'"""
+        """show_private_repo_names=N >= len(name) still uses [prefix****] format"""
         src_repos = [{"name": "abc", "private": True}]
         tgt_repos = [{"name": "abc"}]
 
@@ -581,8 +581,8 @@ class TestSyncOneDirection:
                 **self._common_kwargs(show_private_repo_names=10)
             )
         log_messages = " ".join(str(c) for c in mock_log.call_args_list)
-        assert "abc" in log_messages
-        assert "abc..." not in log_messages
+        assert "[abc****]" in log_messages
+        assert "secret-repo" not in log_messages
 
     def test_create_repo_receives_masked_log_repo_name(self):
         """create_gitee_repo receives log_repo_name=[private] for private repos"""

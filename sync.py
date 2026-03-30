@@ -187,7 +187,7 @@ def parse_args():
             "(default: false). "
             "false/no/none: mask as [private]; "
             "true/yes/full: show full name; "
-            "N (positive integer): show first N characters (e.g. 3 → 'CSM...')."
+            "N (positive integer): show first N characters (e.g. 3 → '[CSM****]')."
         ),
     )
     parser.add_argument(
@@ -391,9 +391,9 @@ def sync_one_direction(source_platform, target_platform, source_owner,
         if show_private_repo_names is True:
             return name
         if show_private_repo_names is not False:
-            # Positive integer: show first N characters
+            # Positive integer: show first N characters followed by ****
             n = show_private_repo_names
-            return name[:n] + "..." if len(name) > n else name
+            return f"[{name[:n]}****]"
         return "[private]"
 
     logging.info(f"Repos to sync: {len(source_repos)}")
