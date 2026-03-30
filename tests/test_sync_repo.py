@@ -68,6 +68,7 @@ class TestMirrorSync:
 
         with patch("lib.sync_repo.subprocess.run",
                    side_effect=[clone_proc, push_all_proc, push_tags_proc]), \
+             patch("lib.sync_repo._refs_already_in_sync", return_value=False), \
              patch("lib.sync_repo.make_git_env",
                    return_value=({}, "/tmp/fake_askpass")) as mock_env, \
              patch("lib.sync_repo.shutil.rmtree"), \
@@ -122,6 +123,7 @@ class TestMirrorSync:
         push_all_proc = _make_process(returncode=1, stderr="error: push failed")
         with patch("lib.sync_repo.subprocess.run",
                    side_effect=[clone_proc, push_all_proc]), \
+             patch("lib.sync_repo._refs_already_in_sync", return_value=False), \
              patch("lib.sync_repo.make_git_env",
                    return_value=({}, "/tmp/fake")), \
              patch("lib.sync_repo.shutil.rmtree"), \
@@ -141,6 +143,7 @@ class TestMirrorSync:
         push_tags_proc = _make_process(returncode=1, stderr="error: tags push failed")
         with patch("lib.sync_repo.subprocess.run",
                    side_effect=[clone_proc, push_all_proc, push_tags_proc]), \
+             patch("lib.sync_repo._refs_already_in_sync", return_value=False), \
              patch("lib.sync_repo.make_git_env",
                    return_value=({}, "/tmp/fake")), \
              patch("lib.sync_repo.shutil.rmtree"), \
@@ -211,12 +214,15 @@ class TestMirrorSync:
             clone_ok = _make_process(returncode=0, stdout="", stderr="")
             push_all_ok = _make_process(returncode=0)
             push_tags_ok = _make_process(returncode=0)
-            # First call (clone, attempt 0) times out; subsequent calls succeed
+            # First call (clone, attempt 0) times out; subsequent calls succeed.
+            # _refs_already_in_sync is patched to return False so we don't need
+            # to supply additional subprocess.run entries for show-ref/ls-remote.
             with patch("lib.sync_repo.subprocess.run",
                        side_effect=[
                            subprocess.TimeoutExpired("git", 1800),
                            clone_ok, push_all_ok, push_tags_ok,
                        ]), \
+                 patch("lib.sync_repo._refs_already_in_sync", return_value=False), \
                  patch("lib.sync_repo.make_git_env",
                        return_value=({}, "/tmp/fake")), \
                  patch("lib.sync_repo.shutil.rmtree"), \
@@ -237,8 +243,11 @@ class TestMirrorSync:
         clone_proc = _make_process(returncode=0)
         push_all_proc = _make_process(returncode=0)
         push_tags_proc = _make_process(returncode=0)
+        # _refs_already_in_sync is patched to return False so we don't need to
+        # supply additional subprocess.run entries for show-ref/ls-remote.
         with patch("lib.sync_repo.subprocess.run",
                    side_effect=[clone_proc, push_all_proc, push_tags_proc]) as mock_run, \
+             patch("lib.sync_repo._refs_already_in_sync", return_value=False), \
              patch("lib.sync_repo.make_git_env",
                    return_value=({}, "/tmp/fake")), \
              patch("lib.sync_repo.shutil.rmtree"), \
@@ -281,6 +290,7 @@ class TestMirrorSync:
 
         with patch("lib.sync_repo.subprocess.run",
                    side_effect=[clone_proc, push_all_proc, push_tags_proc]), \
+             patch("lib.sync_repo._refs_already_in_sync", return_value=False), \
              patch("lib.sync_repo.make_git_env",
                    side_effect=fake_make_git_env), \
              patch("lib.sync_repo.shutil.rmtree"), \

@@ -49,7 +49,21 @@ from .gitee_api import get_gitee_repo_details, update_gitee_repo_metadata
 
 # Git 操作超时时间: 默认 30 分钟
 # 大型仓库 clone/push 可能需要较长时间；可通过 GIT_TIMEOUT 环境变量覆盖
-GIT_TIMEOUT = int(os.environ.get("GIT_TIMEOUT", 1800))
+_raw_git_timeout = os.environ.get("GIT_TIMEOUT")
+if _raw_git_timeout is None:
+    GIT_TIMEOUT = 1800
+else:
+    try:
+        _parsed_timeout = int(_raw_git_timeout)
+        if _parsed_timeout <= 0:
+            raise ValueError("GIT_TIMEOUT must be positive")
+        GIT_TIMEOUT = _parsed_timeout
+    except (TypeError, ValueError):
+        logging.warning(
+            "Invalid GIT_TIMEOUT value %r; falling back to default 1800 seconds",
+            _raw_git_timeout,
+        )
+        GIT_TIMEOUT = 1800
 
 # git 超时后自动重试次数 (实际执行次数 = GIT_RETRIES + 1)
 GIT_RETRIES = 1
@@ -210,7 +224,7 @@ def mirror_sync(source_url, target_url, repo_name,
         return "success"
 
     for attempt in range(GIT_RETRIES + 1):
-        temp_dir = tempfile.mkdtemp(prefix=f"sync_{repo_name}_")
+        temp_dir = tempfile.mkdtemp(prefix="sync_mirror_")
         askpass_paths = []
         try:
             # --- Step 1: git clone --mirror (使用 source_token 认证) ---
