@@ -100,7 +100,8 @@ docker run --rm --env-file .env github-gitee-sync
 | 附属信息同步 | `SYNC_EXTRA` | `--sync-extra` | ❌ | 空 | 逗号分隔：`releases,wiki,labels,milestones,issues` |
 | 干运行模式 | `DRY_RUN` | `--dry-run` | ❌ | `false` | 运行全部逻辑但不实际同步，用于调试和测试 |
 | 可见性过滤 | `VISIBILITY` | `--visibility` | ❌ | `all` | `all` / `public` / `private`，在 include/exclude 过滤之后再次按可见性过滤仓库 |
-| 显示私有仓库名 | `SHOW_PRIVATE_REPO_NAMES` | `--show-private-repo-names` | ❌ | `false` | 是否在日志中显示私有仓库名称，默认隐藏为 `[private]` |
+| 显示私有仓库名 | `SHOW_PRIVATE_REPO_NAMES` | `--show-private-repo-names` | ❌ | `false` | 日志中私有仓库名的显示方式：`false` 隐藏为 `[private]`；`true` 显示完整名称；正整数 N 显示前 N 个字符（如 `3` → `[CSM****]`） |
+| Git 超时时间 | `GIT_TIMEOUT` | `--git-timeout` | ❌ | `1800` | 单次 git 操作的超时秒数（默认 30 分钟）；超时后自动重试一次 |
 
 ---
 

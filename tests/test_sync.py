@@ -57,6 +57,7 @@ class TestParseArgs:
         assert args.sync_extra == set()
         assert args.visibility == "all"
         assert args.show_private_repo_names is False
+        assert args.git_timeout == 1800
 
     def test_bool_conversion_true(self):
         for val in ("true", "True", "1", "yes"):
@@ -155,7 +156,7 @@ class TestParseArgs:
             self._parse(["--visibility=invalid"])
 
     def test_show_private_repo_names_true(self):
-        for val in ("true", "True", "1", "yes"):
+        for val in ("true", "True", "yes"):
             args = self._parse([f"--show-private-repo-names={val}"])
             assert args.show_private_repo_names is True
 
@@ -163,6 +164,35 @@ class TestParseArgs:
         for val in ("false", "False", "0", "no"):
             args = self._parse([f"--show-private-repo-names={val}"])
             assert args.show_private_repo_names is False
+
+    def test_show_private_repo_names_int(self):
+        """Positive integers show first N characters (including '1').
+        Note: '1' was previously treated as boolean True (show full name).
+        It is now treated as the integer 1 (show first 1 character).
+        """
+        for val in ("1", "3", "5"):
+            args = self._parse([f"--show-private-repo-names={val}"])
+            assert args.show_private_repo_names == int(val)
+
+    def test_show_private_repo_names_negative_int_treated_as_false(self):
+        """Non-positive integers are normalised to False (mask completely)."""
+        args = self._parse(["--show-private-repo-names=-1"])
+        assert args.show_private_repo_names is False
+
+    def test_show_private_repo_names_invalid_warns_and_defaults_false(self):
+        """Invalid values warn and fall back to False."""
+        with patch("sync.logging.warning") as mock_warn:
+            args = self._parse(["--show-private-repo-names=banana"])
+        assert args.show_private_repo_names is False
+        mock_warn.assert_called()
+
+    def test_git_timeout_parsed(self):
+        args = self._parse(["--git-timeout=1200"])
+        assert args.git_timeout == 1200
+
+    def test_git_timeout_default(self):
+        args = self._parse([])
+        assert args.git_timeout == 1800
 
 
 # ===========================================================================
@@ -187,6 +217,7 @@ class TestSyncOneDirection:
             dry_run=False,
             visibility="all",
             show_private_repo_names=False,
+            git_timeout=1800,
         )
         defaults.update(overrides)
         return defaults
@@ -518,6 +549,74 @@ class TestSyncOneDirection:
         _, kwargs = mock_extras.call_args
         assert kwargs["log_repo_name"] == "[private]"
 
+    def test_show_private_repo_names_int_shows_prefix_in_log(self):
+        """show_private_repo_names=3 shows first 3 chars wrapped in [****] in logs"""
+        src_repos = [{"name": "secret-repo", "private": True}]
+        tgt_repos = [{"name": "secret-repo"}]
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.mirror_sync", return_value="success"), \
+             patch("sync.sync_repo_metadata"), \
+             patch("sync.logging.info") as mock_log:
+            sync_one_direction(
+                **self._common_kwargs(show_private_repo_names=3)
+            )
+        log_messages = " ".join(str(c) for c in mock_log.call_args_list)
+        assert "[sec****]" in log_messages
+        assert "secret-repo" not in log_messages
+        assert "[private]" not in log_messages
+
+    def test_show_private_repo_names_int_no_ellipsis_when_short(self):
+        """show_private_repo_names=N >= len(name) still uses [prefix****] format"""
+        src_repos = [{"name": "abc", "private": True}]
+        tgt_repos = [{"name": "abc"}]
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.mirror_sync", return_value="success"), \
+             patch("sync.sync_repo_metadata"), \
+             patch("sync.logging.info") as mock_log:
+            sync_one_direction(
+                **self._common_kwargs(show_private_repo_names=10)
+            )
+        log_messages = " ".join(str(c) for c in mock_log.call_args_list)
+        assert "[abc****]" in log_messages
+        assert "secret-repo" not in log_messages
+
+    def test_create_repo_receives_masked_log_repo_name(self):
+        """create_gitee_repo receives log_repo_name=[private] for private repos"""
+        src_repos = [{"name": "secret-repo", "private": True}]
+        tgt_repos = []  # repo doesn't exist yet → creation triggered
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.create_gitee_repo", return_value=True) as mock_create, \
+             patch("sync.mirror_sync", return_value="success"), \
+             patch("sync.sync_repo_metadata"):
+            sync_one_direction(
+                **self._common_kwargs(show_private_repo_names=False)
+            )
+        assert mock_create.call_count == 1
+        _, kwargs = mock_create.call_args
+        assert kwargs["log_repo_name"] == "[private]"
+
+    def test_git_timeout_passed_to_mirror_sync(self):
+        """git_timeout is passed through to mirror_sync"""
+        src_repos = [{"name": "repo", "private": False}]
+        tgt_repos = [{"name": "repo"}]
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.mirror_sync", return_value="success") as mock_ms, \
+             patch("sync.sync_repo_metadata"):
+            sync_one_direction(
+                **self._common_kwargs(git_timeout=1200)
+            )
+        assert mock_ms.call_count == 1
+        _, kwargs = mock_ms.call_args
+        assert kwargs["git_timeout"] == 1200
+
 
 # ===========================================================================
 # sync_all — exit codes
@@ -540,6 +639,7 @@ class TestSyncAll:
             dry_run=dry_run,
             visibility="all",
             show_private_repo_names=False,
+            git_timeout=1800,
         )
         return args
 
