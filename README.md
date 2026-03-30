@@ -1,8 +1,8 @@
 # GitHub-Gitee-Sync
 
-Sync All the Repos(public/private) between GitHub and Gitee.
+Sync All the Repos(public/private) between [GitHub](https://github.com/) and [Gitee](https://gitee.com/).
 
-同步 GitHub 和 Gitee 账号下的全部仓库（支持公开和私有仓库）。
+同步 [GitHub](https://github.com/) 和 [Gitee](https://gitee.com/) 账号下的全部仓库（支持公开和私有仓库）。
 
 ---
 
