@@ -796,6 +796,22 @@ class TestSyncReleases:
         method, url = mock_api.call_args[0]
         assert method == "POST"
 
+    def test_create_release_includes_target_commitish(self):
+        """Payload sent to Gitee must include target_commitish from source."""
+        src = self._release("v2.0.0")
+        src["target_commitish"] = "main"
+        tgt_releases = []
+        mock_resp = _make_resp(self._release("v2.0.0"), status=201)
+        with patch("lib.sync_repo.paginated_get",
+                   side_effect=[[src], tgt_releases]), \
+             patch("lib.sync_repo.api_request",
+                   return_value=mock_resp) as mock_api:
+            sync_releases("github", "gitee", "src", "tgt",
+                          "tok1", "tok2", "repo")
+        mock_api.assert_called_once()
+        payload = mock_api.call_args[1]["json"]
+        assert payload["target_commitish"] == "main"
+
     def test_updates_existing_release_when_body_differs(self):
         src_releases = [self._release("v1.0.0", body="new release notes")]
         tgt_releases = [self._release("v1.0.0", body="old release notes")]
