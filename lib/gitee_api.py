@@ -300,8 +300,12 @@ def update_gitee_repo_metadata(owner, token, repo_name, metadata):
         True 成功, False 失败。
     """
     url = f"{GITEE_API}/repos/{owner}/{repo_name}"
-    payload = {}
+    # Gitee PATCH API 要求 name 字段必须存在
+    payload = {"name": repo_name}
     payload.update(metadata)
+    # Gitee API 仓库描述限制 200 字符（与 create_gitee_repo 保持一致）
+    if "description" in payload and payload["description"]:
+        payload["description"] = payload["description"][:200]
     resp = api_request("PATCH", url, headers=gitee_headers(token),
                        json=payload, max_retries=1)
 

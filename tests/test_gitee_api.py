@@ -252,3 +252,20 @@ class TestUpdateGiteeRepoMetadata:
             _, kwargs = mock_req.call_args
             assert kwargs["headers"]["Authorization"] == "Bearer mytoken"
             assert kwargs["json"]["description"] == "updated"
+
+    def test_includes_name_in_payload(self):
+        with patch("lib.gitee_api.api_request",
+                   return_value=_make_resp({}, status=200)) as mock_req:
+            update_gitee_repo_metadata("owner", "token", "myrepo",
+                                       {"description": "desc"})
+            _, kwargs = mock_req.call_args
+            assert kwargs["json"]["name"] == "myrepo"
+
+    def test_truncates_long_description(self):
+        long_desc = "x" * 300
+        with patch("lib.gitee_api.api_request",
+                   return_value=_make_resp({}, status=200)) as mock_req:
+            update_gitee_repo_metadata("owner", "token", "repo",
+                                       {"description": long_desc})
+            _, kwargs = mock_req.call_args
+            assert len(kwargs["json"]["description"]) <= 200
