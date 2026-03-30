@@ -166,7 +166,10 @@ class TestParseArgs:
             assert args.show_private_repo_names is False
 
     def test_show_private_repo_names_int(self):
-        """Positive integers show first N characters."""
+        """Positive integers show first N characters (including '1').
+        Note: '1' was previously treated as boolean True (show full name).
+        It is now treated as the integer 1 (show first 1 character).
+        """
         for val in ("1", "3", "5"):
             args = self._parse([f"--show-private-repo-names={val}"])
             assert args.show_private_repo_names == int(val)

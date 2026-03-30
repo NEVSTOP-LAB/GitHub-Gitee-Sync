@@ -329,7 +329,10 @@ def mirror_sync(source_url, target_url, repo_name,
                 except OSError as e:
                     logging.warning(f"  Failed to clean askpass script {p}: {e}")
 
-    return "failed"  # 所有重试均超时
+    # Defensive fallback: the loop above always returns via one of the
+    # `return` statements inside the try/except blocks. This line is
+    # logically unreachable but kept as a safety net.
+    return "failed"
 
 
 # ===========================================================================
