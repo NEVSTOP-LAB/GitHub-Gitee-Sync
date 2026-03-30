@@ -950,11 +950,14 @@ def sync_labels(source_platform, target_platform, source_owner, target_owner,
             if not name:
                 continue
 
-            # 标准化颜色值: 去掉前缀 '#'
+            # 标准化颜色值: 去掉前缀 '#' 用于比较
             color = src_label.get("color", "")
             if color.startswith("#"):
                 color = color[1:]
             description = src_label.get("description") or ""
+
+            # Gitee 的 Labels API 要求颜色值带 '#' 前缀，GitHub 则不需要
+            gitee_color = f"#{color}"
 
             if name not in tgt_by_name:
                 # --- 创建新 label ---
@@ -967,18 +970,23 @@ def sync_labels(source_platform, target_platform, source_owner, target_owner,
                     target_platform,
                     f"/repos/{target_owner}/{repo_name}/labels",
                 )
-                payload = {
-                    "name": name,
-                    "color": color,
-                    "description": description,
-                }
                 if target_platform == "github":
+                    payload = {
+                        "name": name,
+                        "color": color,
+                        "description": description,
+                    }
                     resp = api_request(
                         "POST", url,
                         headers=github_headers(target_token),
                         json=payload, max_retries=1,
                     )
                 else:
+                    payload = {
+                        "name": name,
+                        "color": gitee_color,
+                        "description": description,
+                    }
                     resp = api_request(
                         "POST", url, headers=gitee_headers(target_token),
                         json=payload, max_retries=1,
@@ -1013,18 +1021,22 @@ def sync_labels(source_platform, target_platform, source_owner, target_owner,
                         f"{encoded_name}",
                     )
                     # 始终发送 description，即使为空（确保能清除目标端的描述）
-                    payload = {
-                        "color": color,
-                        "description": description,
-                    }
                     if target_platform == "github":
-                        payload["new_name"] = name
+                        payload = {
+                            "new_name": name,
+                            "color": color,
+                            "description": description,
+                        }
                         resp = api_request(
                             "PATCH", url,
                             headers=github_headers(target_token),
                             json=payload, max_retries=1,
                         )
                     else:
+                        payload = {
+                            "color": gitee_color,
+                            "description": description,
+                        }
                         resp = api_request(
                             "PATCH", url, headers=gitee_headers(target_token),
                             json=payload, max_retries=1,
