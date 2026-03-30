@@ -55,6 +55,8 @@ class TestParseArgs:
         assert args.dry_run is False
         assert args.exclude_repos == set()
         assert args.sync_extra == set()
+        assert args.visibility == "all"
+        assert args.show_private_repo_names is False
 
     def test_bool_conversion_true(self):
         for val in ("true", "True", "1", "yes"):
@@ -143,6 +145,25 @@ class TestParseArgs:
         with pytest.raises(SystemExit):
             self._parse(["--direction=invalid"])
 
+    def test_visibility_choices(self):
+        for vis in ("all", "public", "private"):
+            args = self._parse([f"--visibility={vis}"])
+            assert args.visibility == vis
+
+    def test_invalid_visibility_exits(self):
+        with pytest.raises(SystemExit):
+            self._parse(["--visibility=invalid"])
+
+    def test_show_private_repo_names_true(self):
+        for val in ("true", "True", "1", "yes"):
+            args = self._parse([f"--show-private-repo-names={val}"])
+            assert args.show_private_repo_names is True
+
+    def test_show_private_repo_names_false(self):
+        for val in ("false", "False", "0", "no"):
+            args = self._parse([f"--show-private-repo-names={val}"])
+            assert args.show_private_repo_names is False
+
 
 # ===========================================================================
 # sync_one_direction
@@ -164,6 +185,8 @@ class TestSyncOneDirection:
             create_missing_repos=True,
             sync_extra=set(),
             dry_run=False,
+            visibility="all",
+            show_private_repo_names=False,
         )
         defaults.update(overrides)
         return defaults
@@ -329,6 +352,120 @@ class TestSyncOneDirection:
             )
         assert synced == 2
 
+    def test_visibility_public_filters_private_repos(self):
+        """visibility=public 时排除私有仓库"""
+        src_repos = [
+            {"name": "public-repo", "private": False},
+            {"name": "private-repo", "private": True},
+        ]
+        tgt_repos = [{"name": "public-repo"}]
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.mirror_sync", return_value="success"), \
+             patch("sync.sync_repo_metadata"):
+            synced, failed, skipped, failed_repos = sync_one_direction(
+                **self._common_kwargs(visibility="public")
+            )
+        assert synced == 1
+
+    def test_visibility_private_filters_public_repos(self):
+        """visibility=private 时排除公开仓库"""
+        src_repos = [
+            {"name": "public-repo", "private": False},
+            {"name": "private-repo", "private": True},
+        ]
+        tgt_repos = [{"name": "private-repo"}]
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.mirror_sync", return_value="success"), \
+             patch("sync.sync_repo_metadata"):
+            synced, failed, skipped, failed_repos = sync_one_direction(
+                **self._common_kwargs(visibility="private")
+            )
+        assert synced == 1
+
+    def test_visibility_all_keeps_all_repos(self):
+        """visibility=all 时不过滤"""
+        src_repos = [
+            {"name": "public-repo", "private": False},
+            {"name": "private-repo", "private": True},
+        ]
+        tgt_repos = [{"name": "public-repo"}, {"name": "private-repo"}]
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.mirror_sync", return_value="success"), \
+             patch("sync.sync_repo_metadata"):
+            synced, failed, skipped, failed_repos = sync_one_direction(
+                **self._common_kwargs(visibility="all")
+            )
+        assert synced == 2
+
+    def test_show_private_repo_names_false_masks_names_in_log(self):
+        """show_private_repo_names=False 时日志中私有仓库名被脱敏"""
+        src_repos = [{"name": "secret-repo", "private": True}]
+        tgt_repos = [{"name": "secret-repo"}]
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.mirror_sync", return_value="success"), \
+             patch("sync.sync_repo_metadata"), \
+             patch("sync.logging.info") as mock_log:
+            sync_one_direction(
+                **self._common_kwargs(show_private_repo_names=False)
+            )
+        log_messages = " ".join(str(c) for c in mock_log.call_args_list)
+        assert "[private]" in log_messages
+        assert "secret-repo" not in log_messages
+
+    def test_show_private_repo_names_true_shows_names_in_log(self):
+        """show_private_repo_names=True 时日志中显示私有仓库名"""
+        src_repos = [{"name": "secret-repo", "private": True}]
+        tgt_repos = [{"name": "secret-repo"}]
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.mirror_sync", return_value="success"), \
+             patch("sync.sync_repo_metadata"), \
+             patch("sync.logging.info") as mock_log:
+            sync_one_direction(
+                **self._common_kwargs(show_private_repo_names=True)
+            )
+        log_messages = " ".join(str(c) for c in mock_log.call_args_list)
+        assert "secret-repo" in log_messages
+
+    def test_show_private_repo_names_false_does_not_mask_public_repos(self):
+        """show_private_repo_names=False 时公开仓库名不被脱敏"""
+        src_repos = [{"name": "public-repo", "private": False}]
+        tgt_repos = [{"name": "public-repo"}]
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.mirror_sync", return_value="success"), \
+             patch("sync.sync_repo_metadata"), \
+             patch("sync.logging.info") as mock_log:
+            sync_one_direction(
+                **self._common_kwargs(show_private_repo_names=False)
+            )
+        log_messages = " ".join(str(c) for c in mock_log.call_args_list)
+        assert "public-repo" in log_messages
+
+    def test_private_repo_name_masked_in_failed_repos(self):
+        """show_private_repo_names=False 时失败仓库名在 failed_repos 中也被脱敏"""
+        src_repos = [{"name": "secret-repo", "private": True}]
+        tgt_repos = [{"name": "secret-repo"}]
+
+        with patch("sync.get_github_repos", return_value=src_repos), \
+             patch("sync.get_gitee_repos", return_value=tgt_repos), \
+             patch("sync.mirror_sync", return_value="failed"):
+            synced, failed, skipped, failed_repos = sync_one_direction(
+                **self._common_kwargs(show_private_repo_names=False)
+            )
+        assert failed == 1
+        assert failed_repos[0][0] == "[private]"
+
 
 # ===========================================================================
 # sync_all — exit codes
@@ -349,6 +486,8 @@ class TestSyncAll:
             create_missing_repos=True,
             sync_extra=set(),
             dry_run=dry_run,
+            visibility="all",
+            show_private_repo_names=False,
         )
         return args
 

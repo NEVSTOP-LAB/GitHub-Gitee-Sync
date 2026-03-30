@@ -71,6 +71,10 @@ def main() -> None:
         "CREATE_MISSING_REPOS": _get_input("create-missing-repos", "true"),
         "SYNC_EXTRA":           _get_input("sync-extra",           ""),
         "DRY_RUN":              _get_input("dry-run",              "false"),
+        "VISIBILITY":           _get_input("visibility",           "all"),
+        "SHOW_PRIVATE_REPO_NAMES": _get_input(
+            "show-private-repo-names", "false"
+        ),
     }
 
     for key, value in mappings.items():
