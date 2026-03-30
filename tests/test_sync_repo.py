@@ -878,6 +878,68 @@ class TestSyncReleases:
                           "tok1", "tok2", "repo")
         mock_api.assert_not_called()
 
+    def test_creates_releases_in_chronological_order(self):
+        """Releases should be created oldest-first so the newest becomes
+        the 'latest release' on the target platform."""
+        # API 通常返回最新在前（倒序）
+        src_releases = [
+            {**self._release("v3.0.0"), "created_at": "2024-03-01T00:00:00Z"},
+            {**self._release("v2.0.0"), "created_at": "2024-02-01T00:00:00Z"},
+            {**self._release("v1.0.0"), "created_at": "2024-01-01T00:00:00Z"},
+        ]
+        tgt_releases = []
+        mock_resp = _make_resp(self._release("dummy"), status=201)
+        with patch("lib.sync_repo.paginated_get",
+                   side_effect=[src_releases, tgt_releases]), \
+             patch("lib.sync_repo.api_request",
+                   return_value=mock_resp) as mock_api:
+            sync_releases("github", "gitee", "src", "tgt",
+                          "tok1", "tok2", "repo")
+        assert mock_api.call_count == 3
+        created_tags = [
+            call[1]["json"]["tag_name"]
+            for call in mock_api.call_args_list
+        ]
+        # 应该按时间升序创建: v1 → v2 → v3
+        assert created_tags == ["v1.0.0", "v2.0.0", "v3.0.0"]
+
+    def test_prerelease_status_synced_on_create(self):
+        """Pre-release flag should be preserved when creating a release."""
+        src_releases = [
+            {**self._release("v1.0.0-rc1", prerelease=True),
+             "created_at": "2024-01-01T00:00:00Z"},
+        ]
+        tgt_releases = []
+        mock_resp = _make_resp(self._release("v1.0.0-rc1"), status=201)
+        with patch("lib.sync_repo.paginated_get",
+                   side_effect=[src_releases, tgt_releases]), \
+             patch("lib.sync_repo.api_request",
+                   return_value=mock_resp) as mock_api:
+            sync_releases("github", "gitee", "src", "tgt",
+                          "tok1", "tok2", "repo")
+        payload = mock_api.call_args[1]["json"]
+        assert payload["prerelease"] is True
+
+    def test_prerelease_status_synced_on_update(self):
+        """Pre-release status change should trigger an update."""
+        src_releases = [
+            {**self._release("v1.0.0", prerelease=False),
+             "created_at": "2024-01-01T00:00:00Z"},
+        ]
+        tgt_releases = [self._release("v1.0.0", prerelease=True)]
+        mock_resp = _make_resp({}, status=200)
+        with patch("lib.sync_repo.paginated_get",
+                   side_effect=[src_releases, tgt_releases]), \
+             patch("lib.sync_repo.api_request",
+                   return_value=mock_resp) as mock_api:
+            sync_releases("github", "gitee", "src", "tgt",
+                          "tok1", "tok2", "repo")
+        mock_api.assert_called()
+        method, url = mock_api.call_args[0]
+        assert method == "PATCH"
+        payload = mock_api.call_args[1]["json"]
+        assert payload["prerelease"] is False
+
 
 # ===========================================================================
 # log_repo_name masking — 验证 log_repo_name 在各函数中正确脱敏

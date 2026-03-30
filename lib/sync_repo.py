@@ -489,6 +489,15 @@ def sync_releases(source_platform, target_platform, source_owner, target_owner,
             r["tag_name"]: r for r in tgt_releases if r.get("tag_name")
         }
 
+        # 按 created_at 升序排列（最旧的在前），确保在目标平台创建时
+        # 最新的 release 最后被创建，从而成为"最新 release"。
+        # API 通常返回按创建时间倒序排列的结果（最新的在前），
+        # 如果直接按该顺序创建，会导致最旧的 release 反而成为"最新"。
+        src_releases = sorted(
+            src_releases,
+            key=lambda r: r.get("created_at") or "",
+        )
+
         created = 0
         updated = 0
         for src_rel in src_releases:
