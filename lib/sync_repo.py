@@ -800,6 +800,12 @@ def sync_wiki(source_platform, target_platform, source_owner, target_owner,
             # Push wiki 使用 target_token 认证（增量推送，不删除目标独有内容）
             tgt_env, tgt_askpass = make_git_env(target_token, target_username)
             askpass_paths.append(tgt_askpass)
+
+            # 检查两端 wiki refs 是否完全一致，一致则跳过推送
+            if _refs_already_in_sync(temp_dir, target_url, tgt_env):
+                logging.info(f"  Wiki already in sync, skipping push ⏭️")
+                return
+
             push_result = subprocess.run(
                 ["git", "push", "--all", "--force", target_url],
                 cwd=temp_dir,
