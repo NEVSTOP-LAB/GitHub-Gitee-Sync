@@ -609,9 +609,13 @@ def _update_existing_release(target_platform, target_owner, target_token,
         target_platform,
         f"/repos/{target_owner}/{repo_name}/releases/{release_id}",
     )
+    body = src_rel.get("body") or ""
+    if target_platform == "gitee" and not body:
+        # Gitee API rejects empty body; fall back to tag name
+        body = tag
     payload = {
         "name": src_rel.get("name") or tag,
-        "body": src_rel.get("body") or "",
+        "body": body,
         "prerelease": src_rel.get("prerelease", False),
     }
 
