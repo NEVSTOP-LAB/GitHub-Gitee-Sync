@@ -588,15 +588,25 @@ def sync_releases(source_platform, target_platform, source_owner, target_owner,
 def _update_existing_release(target_platform, target_owner, target_token,
                              repo_name, src_rel, tgt_rel, dry_run):
     """更新已存在 release 的元信息（name, body, prerelease）。"""
+    tag = src_rel.get("tag_name", "")
+
+    # Compute the desired body with the same platform-aware normalization used
+    # in the payload so that the needs_update check compares apples-to-apples.
+    # Without this, a Gitee release whose body was previously set to the tag
+    # name (because the source body was empty) would be patched on every run.
+    desired_body = src_rel.get("body") or ""
+    if target_platform == "gitee" and not desired_body:
+        # Gitee API rejects empty body; fall back to tag name
+        desired_body = tag
+
     needs_update = (
         (src_rel.get("name") or "") != (tgt_rel.get("name") or "")
-        or (src_rel.get("body") or "") != (tgt_rel.get("body") or "")
+        or desired_body != (tgt_rel.get("body") or "")
         or src_rel.get("prerelease", False) != tgt_rel.get("prerelease", False)
     )
     if not needs_update:
         return
 
-    tag = src_rel.get("tag_name", "")
     if dry_run:
         logging.info(f"  [DRY-RUN] Would update release: {tag}")
         return
@@ -611,7 +621,7 @@ def _update_existing_release(target_platform, target_owner, target_token,
     )
     payload = {
         "name": src_rel.get("name") or tag,
-        "body": src_rel.get("body") or "",
+        "body": desired_body,
         "prerelease": src_rel.get("prerelease", False),
     }
 

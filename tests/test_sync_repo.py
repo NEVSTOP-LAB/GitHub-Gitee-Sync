@@ -1054,6 +1054,51 @@ class TestSyncReleases:
         payload = mock_api.call_args[1]["json"]
         assert "target_commitish" not in payload
 
+    def test_update_empty_body_defaults_to_tag_name_for_gitee(self):
+        """When updating a Gitee release with empty source body, body falls back to tag."""
+        src = {**self._release("v1.0.0", body=""), "target_commitish": "main"}
+        tgt = {**self._release("v1.0.0", body="old notes"), "target_commitish": "main"}
+        mock_resp = _make_resp({}, status=200)
+        with patch("lib.sync_repo.paginated_get",
+                   side_effect=[[src], [tgt]]), \
+             patch("lib.sync_repo.api_request",
+                   return_value=mock_resp) as mock_api:
+            sync_releases("github", "gitee", "src", "tgt",
+                          "tok1", "tok2", "repo")
+        payload = mock_api.call_args[1]["json"]
+        assert payload["body"] == "v1.0.0"
+
+    def test_update_empty_body_remains_empty_for_github(self):
+        """When updating a GitHub release with empty source body, body stays empty."""
+        src = {**self._release("v1.0.0", body=""), "target_commitish": "main"}
+        tgt = {**self._release("v1.0.0", body="old notes"), "target_commitish": "main"}
+        mock_resp = _make_resp({}, status=200)
+        with patch("lib.sync_repo.paginated_get",
+                   side_effect=[[src], [tgt]]), \
+             patch("lib.sync_repo.api_request",
+                   return_value=mock_resp) as mock_api:
+            sync_releases("gitee", "github", "src", "tgt",
+                          "tok1", "tok2", "repo")
+        payload = mock_api.call_args[1]["json"]
+        assert payload["body"] == ""
+
+    def test_update_skipped_when_gitee_target_body_already_tag_name(self):
+        """No PATCH when Gitee target body already equals the fallback tag name.
+
+        Without normalizing the desired body before the needs_update check, a
+        release where the source body is empty but the target was previously set
+        to the tag name would trigger a redundant PATCH on every sync run.
+        """
+        src = {**self._release("v1.0.0", body=""), "target_commitish": "main"}
+        # Target body is already the tag name (result of a prior sync)
+        tgt = {**self._release("v1.0.0", body="v1.0.0"), "target_commitish": "main"}
+        with patch("lib.sync_repo.paginated_get",
+                   side_effect=[[src], [tgt]]), \
+             patch("lib.sync_repo.api_request") as mock_api:
+            sync_releases("github", "gitee", "src", "tgt",
+                          "tok1", "tok2", "repo")
+        mock_api.assert_not_called()
+
     def test_create_failure_logs_response_body(self, caplog):
         """400 error should include response body in log for debugging."""
         src_releases = [self._release("v1.0.0", body="notes")]
