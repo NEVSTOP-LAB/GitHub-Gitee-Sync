@@ -183,10 +183,7 @@ def create_local_repo(local_path, repo_name, log_repo_name=None, **_ignored):
                 f"{result.stderr.strip()}"
             )
             # 清理半成品
-            try:
-                shutil.rmtree(target_dir, ignore_errors=True)
-            except OSError:
-                pass
+            shutil.rmtree(target_dir, ignore_errors=True)
             return False
         logging.info(f"  Initialized local bare repo at {target_dir}")
         return True
@@ -194,4 +191,6 @@ def create_local_repo(local_path, repo_name, log_repo_name=None, **_ignored):
         logging.error(
             f"  Failed to create local repo {log_repo_name} at {target_dir}: {e}"
         )
+        # 异常路径同样清理半成品目录，保持幂等
+        shutil.rmtree(target_dir, ignore_errors=True)
         return False

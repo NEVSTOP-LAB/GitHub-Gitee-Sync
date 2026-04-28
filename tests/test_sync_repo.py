@@ -1232,6 +1232,14 @@ class TestIsLocalTarget:
         assert _is_local_target("git@github.com:owner/r.git") is False
         assert _is_local_target("git://host/r.git") is False
 
+    def test_scp_like_ssh_is_remote(self):
+        # 通用 scp-like SSH 形式 [user@]host:path 也应识别为远程
+        assert _is_local_target("user@host.example.com:owner/r.git") is False
+        assert _is_local_target("host.example.com:owner/r.git") is False
+
+    def test_file_url_case_insensitive_is_local(self):
+        assert _is_local_target("FILE:///var/repos/foo.git") is True
+
     def test_linux_path_is_local(self):
         assert _is_local_target("/var/repos/foo.git") is True
 

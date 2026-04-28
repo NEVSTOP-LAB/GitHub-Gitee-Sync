@@ -977,9 +977,9 @@ class TestSyncAllLocalDirection:
                                    sync_extra={"labels", "wiki"})
             sync_all(args)
         positional = mock_sync.call_args[0]
-        # sync_extra is the 11th positional arg (index 10) per current signature
-        # Use kwargs/positional mix: easier to verify by checking the call:
+        # sync_one_direction signature (positional):
         # source_platform, target_platform, source_owner, target_owner,
         # source_token, target_token, account_type, include_private,
         # include_repos, exclude_repos, create_missing_repos, sync_extra
+        # → sync_extra is at index 11.
         assert positional[11] == set()
