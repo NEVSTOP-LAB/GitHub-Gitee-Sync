@@ -50,6 +50,11 @@ from lib.gitee_api import (
     get_gitee_repos,
     validate_gitee_token,
 )
+from lib.local_target import (
+    create_local_repo,
+    ensure_local_path_writable,
+    get_local_repos,
+)
 from lib.sync_repo import (
     mirror_sync,
     sync_extras,
@@ -144,8 +149,18 @@ def parse_args():
     parser.add_argument(
         "--direction",
         default=os.environ.get("SYNC_DIRECTION", "github2gitee"),
-        choices=["github2gitee", "gitee2github", "both"],
-        help="Sync direction (default: github2gitee)",
+        choices=[
+            "github2gitee",
+            "gitee2github",
+            "both",
+            "github2local",
+            "gitee2local",
+        ],
+        help=(
+            "Sync direction (default: github2gitee). "
+            "'github2local' / 'gitee2local' sync to a local directory "
+            "specified by --local-path."
+        ),
     )
     parser.add_argument(
         "--create-missing-repos",
@@ -196,6 +211,15 @@ def parse_args():
         help=(
             "Timeout in seconds for individual git operations "
             "(default: 900). Large repos may need a higher value."
+        ),
+    )
+    parser.add_argument(
+        "--local-path",
+        default=os.environ.get("LOCAL_PATH", ""),
+        help=(
+            "Local directory path used as sync target when --direction is "
+            "'github2local' or 'gitee2local'. Supports Windows "
+            "(e.g. 'C:\\\\repos') and Linux/macOS (e.g. '/var/repos') paths."
         ),
     )
 
@@ -269,19 +293,40 @@ def parse_args():
             "include-repos takes precedence; exclude-repos will be ignored."
         )
 
-    # --- 必填参数校验 ---
+    # --- 必填参数校验（依赖 direction）---
+    # local target 方向只需要 source 平台的 token/owner。
+    direction = args.direction
+    needs_github = direction in ("github2gitee", "gitee2github", "both",
+                                 "github2local")
+    needs_gitee = direction in ("github2gitee", "gitee2github", "both",
+                                "gitee2local")
+    needs_local = direction in ("github2local", "gitee2local")
+
     missing = []
-    if not args.github_owner:
+    if needs_github and not args.github_owner:
         missing.append("github-owner (or GITHUB_OWNER env)")
-    if not args.github_token:
+    if needs_github and not args.github_token:
         missing.append("github-token (or GITHUB_TOKEN env)")
-    if not args.gitee_owner:
+    if needs_gitee and not args.gitee_owner:
         missing.append("gitee-owner (or GITEE_OWNER env)")
-    if not args.gitee_token:
+    if needs_gitee and not args.gitee_token:
         missing.append("gitee-token (or GITEE_TOKEN env)")
+    if needs_local and not args.local_path:
+        missing.append(
+            "local-path (or LOCAL_PATH env) is required for "
+            f"direction={direction}"
+        )
 
     if missing:
         parser.error(f"Missing required parameters: {', '.join(missing)}")
+
+    # local target 不支持 sync-extra（无 API 可调用）
+    if needs_local and args.sync_extra:
+        logging.warning(
+            "sync-extra is not supported for local target; ignoring: "
+            f"{', '.join(sorted(args.sync_extra))}"
+        )
+        args.sync_extra = set()
 
     return args
 
@@ -410,10 +455,13 @@ def sync_one_direction(source_platform, target_platform, source_owner,
         target_repos_list = get_github_repos(
             target_owner, target_token, account_type, True
         )
-    else:
+    elif target_platform == "gitee":
         target_repos_list = get_gitee_repos(
             target_owner, target_token, account_type
         )
+    else:
+        # local target: target_owner 实际上是本地路径
+        target_repos_list = get_local_repos(target_owner)
 
     target_repo_names = {r["name"] for r in target_repos_list}
     logging.info(
@@ -464,12 +512,18 @@ def sync_one_direction(source_platform, target_platform, source_owner,
                         account_type,
                         log_repo_name=display_name,
                     )
-                else:
+                elif target_platform == "gitee":
                     ok = create_gitee_repo(
                         target_owner, target_token, repo_name,
                         repo.get("private", False),
                         repo.get("description", ""),
                         account_type,
+                        log_repo_name=display_name,
+                    )
+                else:
+                    # local target: target_owner 是本地路径
+                    ok = create_local_repo(
+                        target_owner, repo_name,
                         log_repo_name=display_name,
                     )
 
@@ -511,27 +565,29 @@ def sync_one_direction(source_platform, target_platform, source_owner,
 
         # --- Step C: 同步仓库元信息 (description, homepage) ---
         # 对应: docs/计划/流程图.md — "同步元信息"
-        sync_repo_metadata(
-            source_platform, target_platform,
-            source_owner, target_owner,
-            source_token, target_token,
-            repo_name, dry_run,
-            log_repo_name=display_name,
-        )
-
-        # --- Step D-H: 同步附属信息 (releases, wiki, labels, ...) ---
-        # 对应: docs/计划/流程图.md — "同步附属信息"
-        if sync_extra:
-            sync_extras(
+        # local target 没有 API，跳过元信息和附属信息同步
+        if target_platform != "local":
+            sync_repo_metadata(
                 source_platform, target_platform,
                 source_owner, target_owner,
                 source_token, target_token,
-                repo_name, sync_extra, dry_run,
-                source_username=source_username,
-                target_username=target_username,
+                repo_name, dry_run,
                 log_repo_name=display_name,
-                git_timeout=git_timeout,
             )
+
+            # --- Step D-H: 同步附属信息 (releases, wiki, labels, ...) ---
+            # 对应: docs/计划/流程图.md — "同步附属信息"
+            if sync_extra:
+                sync_extras(
+                    source_platform, target_platform,
+                    source_owner, target_owner,
+                    source_token, target_token,
+                    repo_name, sync_extra, dry_run,
+                    source_username=source_username,
+                    target_username=target_username,
+                    log_repo_name=display_name,
+                    git_timeout=git_timeout,
+                )
 
         synced += 1
 
@@ -618,6 +674,60 @@ def sync_all(args):
         total_skipped += sk
         all_failed_repos.extend(fr)
 
+    # --- 同步到本地目录: GitHub → Local ---
+    if direction == "github2local":
+        local_path = getattr(args, "local_path", "")
+        logging.info("=" * 50)
+        logging.info(
+            f"Syncing GitHub({args.github_owner}) → Local({local_path})"
+        )
+        logging.info("=" * 50)
+        s, f, sk, fr = sync_one_direction(
+            "github", "local",
+            args.github_owner, local_path,
+            args.github_token, "",
+            args.account_type, args.include_private,
+            args.include_repos, args.exclude_repos,
+            args.create_missing_repos,
+            set(), dry_run,
+            source_username=github_username,
+            target_username="git",
+            visibility=args.visibility,
+            show_private_repo_names=args.show_private_repo_names,
+            git_timeout=args.git_timeout,
+        )
+        total_synced += s
+        total_failed += f
+        total_skipped += sk
+        all_failed_repos.extend(fr)
+
+    # --- 同步到本地目录: Gitee → Local ---
+    if direction == "gitee2local":
+        local_path = getattr(args, "local_path", "")
+        logging.info("=" * 50)
+        logging.info(
+            f"Syncing Gitee({args.gitee_owner}) → Local({local_path})"
+        )
+        logging.info("=" * 50)
+        s, f, sk, fr = sync_one_direction(
+            "gitee", "local",
+            args.gitee_owner, local_path,
+            args.gitee_token, "",
+            args.account_type, args.include_private,
+            args.include_repos, args.exclude_repos,
+            args.create_missing_repos,
+            set(), dry_run,
+            source_username=gitee_username,
+            target_username="git",
+            visibility=args.visibility,
+            show_private_repo_names=args.show_private_repo_names,
+            git_timeout=args.git_timeout,
+        )
+        total_synced += s
+        total_failed += f
+        total_skipped += sk
+        all_failed_repos.extend(fr)
+
     # === 同步摘要 ===
     logging.info("=" * 50)
     logging.info("===== Sync Summary =====")
@@ -679,21 +789,42 @@ def main():
         # --- 前置检查 ---
         # 对应: docs/计划/错误处理设计.md — "环境检查失败 → 立即退出(code=3)"
         check_git_installed()
-        github_username = validate_github_token(args.github_token)
-        if not github_username or github_username == "unknown":
-            raise ValueError(
-                "无法从 GitHub Token 中解析到有效的用户名 (login 字段缺失或为 'unknown')，"
-                "请检查 GITHUB_TOKEN 是否正确且具有足够权限。"
-            )
-        args.github_username = github_username
 
-        gitee_username = validate_gitee_token(args.gitee_token)
-        if not gitee_username or gitee_username == "unknown":
-            raise ValueError(
-                "无法从 Gitee Token 中解析到有效的用户名 (login 字段缺失或为 'unknown')，"
-                "请检查 GITEE_TOKEN 是否正确且具有足够权限。"
-            )
-        args.gitee_username = gitee_username
+        direction = args.direction
+        # 根据 direction 决定哪些 token 需要校验
+        # local target 方向只需校验源平台 token
+        needs_github = direction in (
+            "github2gitee", "gitee2github", "both", "github2local"
+        )
+        needs_gitee = direction in (
+            "github2gitee", "gitee2github", "both", "gitee2local"
+        )
+        needs_local = direction in ("github2local", "gitee2local")
+
+        if needs_github:
+            github_username = validate_github_token(args.github_token)
+            if not github_username or github_username == "unknown":
+                raise ValueError(
+                    "无法从 GitHub Token 中解析到有效的用户名 (login 字段缺失或为 'unknown')，"
+                    "请检查 GITHUB_TOKEN 是否正确且具有足够权限。"
+                )
+            args.github_username = github_username
+        else:
+            args.github_username = "git"
+
+        if needs_gitee:
+            gitee_username = validate_gitee_token(args.gitee_token)
+            if not gitee_username or gitee_username == "unknown":
+                raise ValueError(
+                    "无法从 Gitee Token 中解析到有效的用户名 (login 字段缺失或为 'unknown')，"
+                    "请检查 GITEE_TOKEN 是否正确且具有足够权限。"
+                )
+            args.gitee_username = gitee_username
+        else:
+            args.gitee_username = "git"
+
+        if needs_local:
+            ensure_local_path_writable(args.local_path)
     except Exception as e:
         logging.error(f"[FATAL] {e}")
         sys.exit(3)

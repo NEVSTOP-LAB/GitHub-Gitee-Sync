@@ -247,26 +247,35 @@ def sanitize_response_text(text, max_len=200):
 
 
 def build_clone_url(platform, owner, repo_name):
-    """构建无凭据的 Git clone URL。
+    """构建无凭据的 Git clone URL（或本地路径）。
 
     出于安全考虑，不在 URL 中内联 Token — Token 通过 GIT_ASKPASS 传递。
     这样即使 git 输出错误信息，也不会泄露 Token。
 
     Args:
-        platform: 平台标识 ("github" 或 "gitee")。
-        owner: 仓库所有者。
+        platform: 平台标识 ("github"、"gitee" 或 "local")。
+        owner: 仓库所有者；当 platform 为 "local" 时，应传入本地根目录路径。
         repo_name: 仓库名。
 
     Returns:
-        形如 https://github.com/<owner>/<repo>.git 的 URL。
+        - "github"/"gitee": 形如 https://<host>/<owner>/<repo>.git 的 URL。
+        - "local": 形如 ``<local_path>/<repo>.git`` 的文件系统路径
+          （兼容 Windows / Linux 分隔符）。
 
     对应需求: docs/调研/Git-Mirror-同步机制.md — "HTTPS + Token"
     安全改进: Token 不再出现在 URL 中，由 GIT_ASKPASS 提供。
+    扩展: 添加 "local" target 支持，通过 lib.local_target 构建本地路径。
     """
     if platform == "github":
         return f"https://github.com/{owner}/{repo_name}.git"
-    else:
+    if platform == "gitee":
         return f"https://gitee.com/{owner}/{repo_name}.git"
+    if platform == "local":
+        # 延迟导入避免循环依赖（local_target 不依赖 utils 任何符号，
+        # 但放在函数内可降低模块加载耦合）
+        from .local_target import build_local_clone_url
+        return build_local_clone_url(owner, repo_name)
+    raise ValueError(f"Unsupported platform: {platform!r}")
 
 
 def make_git_env(token, username="git"):

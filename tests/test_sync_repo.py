@@ -1211,3 +1211,91 @@ class TestLogRepoNameMasking:
         info_messages = " ".join(str(c) for c in mock_info.call_args_list)
         assert "[private]" in info_messages
         assert "secret-repo" not in info_messages
+
+
+# ===========================================================================
+# _is_local_target / mirror_sync to local target
+# ===========================================================================
+
+from lib.sync_repo import _is_local_target
+
+
+class TestIsLocalTarget:
+    def test_https_url_is_remote(self):
+        assert _is_local_target("https://github.com/o/r.git") is False
+
+    def test_http_url_is_remote(self):
+        assert _is_local_target("http://example.com/r.git") is False
+
+    def test_ssh_url_is_remote(self):
+        assert _is_local_target("ssh://git@host/r.git") is False
+        assert _is_local_target("git@github.com:owner/r.git") is False
+        assert _is_local_target("git://host/r.git") is False
+
+    def test_linux_path_is_local(self):
+        assert _is_local_target("/var/repos/foo.git") is True
+
+    def test_relative_path_is_local(self):
+        assert _is_local_target("repos/foo.git") is True
+
+    def test_windows_path_is_local(self):
+        assert _is_local_target("C:\\repos\\foo.git") is True
+        assert _is_local_target("D:/repos/foo.git") is True
+
+    def test_file_url_is_local(self):
+        assert _is_local_target("file:///var/repos/foo.git") is True
+
+    def test_empty_returns_false(self):
+        assert _is_local_target("") is False
+        assert _is_local_target(None) is False
+
+
+class TestMirrorSyncToLocalTarget:
+    """When target is local, make_git_env should NOT be called for target."""
+
+    def test_local_target_skips_target_askpass(self):
+        clone_proc = _make_process(returncode=0)
+        push_all_proc = _make_process(returncode=0)
+        push_tags_proc = _make_process(returncode=0)
+
+        with patch("lib.sync_repo.subprocess.run",
+                   side_effect=[clone_proc, push_all_proc, push_tags_proc]), \
+             patch("lib.sync_repo._refs_already_in_sync", return_value=False), \
+             patch("lib.sync_repo.make_git_env",
+                   return_value=({}, "/tmp/fake_askpass")) as mock_env, \
+             patch("lib.sync_repo.shutil.rmtree"), \
+             patch("lib.sync_repo.os.unlink"), \
+             patch("lib.sync_repo.tempfile.mkdtemp",
+                   return_value="/tmp/testdir"):
+            result = mirror_sync(
+                "https://github.com/src/repo.git",
+                "/var/repos/repo.git",  # local target
+                "repo",
+                "src_token", "",  # no target token
+            )
+        assert result == "success"
+        # Only source side should call make_git_env
+        assert mock_env.call_count == 1
+
+    def test_local_windows_target_skips_target_askpass(self):
+        clone_proc = _make_process(returncode=0)
+        push_all_proc = _make_process(returncode=0)
+        push_tags_proc = _make_process(returncode=0)
+
+        with patch("lib.sync_repo.subprocess.run",
+                   side_effect=[clone_proc, push_all_proc, push_tags_proc]), \
+             patch("lib.sync_repo._refs_already_in_sync", return_value=False), \
+             patch("lib.sync_repo.make_git_env",
+                   return_value=({}, "/tmp/fake_askpass")) as mock_env, \
+             patch("lib.sync_repo.shutil.rmtree"), \
+             patch("lib.sync_repo.os.unlink"), \
+             patch("lib.sync_repo.tempfile.mkdtemp",
+                   return_value="/tmp/testdir"):
+            result = mirror_sync(
+                "https://github.com/src/repo.git",
+                "C:\\repos\\repo.git",  # Windows local target
+                "repo",
+                "src_token", "",
+            )
+        assert result == "success"
+        assert mock_env.call_count == 1

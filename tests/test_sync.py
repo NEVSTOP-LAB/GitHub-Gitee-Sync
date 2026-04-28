@@ -718,3 +718,268 @@ class TestSyncAll:
         mock_warn.assert_called_once()
         warning_msg = str(mock_warn.call_args)
         assert "skipped" in warning_msg.lower()
+
+
+# ===========================================================================
+# Local target: parse_args + sync_one_direction + sync_all
+# ===========================================================================
+
+class TestParseArgsLocal:
+    """Tests for the local target additions to parse_args."""
+
+    def test_local_path_parsed(self):
+        argv = [
+            "sync.py",
+            "--github-owner", "ghowner",
+            "--github-token", "ghtoken",
+            "--direction", "github2local",
+            "--local-path", "/tmp/myrepos",
+        ]
+        with patch("sys.argv", argv):
+            args = parse_args()
+        assert args.direction == "github2local"
+        assert args.local_path == "/tmp/myrepos"
+
+    def test_github2local_does_not_require_gitee(self):
+        argv = [
+            "sync.py",
+            "--github-owner", "ghowner",
+            "--github-token", "ghtoken",
+            "--direction", "github2local",
+            "--local-path", "/tmp/repos",
+        ]
+        with patch("sys.argv", argv):
+            args = parse_args()
+        assert args.gitee_owner is None or args.gitee_owner == ""
+
+    def test_gitee2local_does_not_require_github(self):
+        argv = [
+            "sync.py",
+            "--gitee-owner", "giteeowner",
+            "--gitee-token", "giteetoken",
+            "--direction", "gitee2local",
+            "--local-path", "/tmp/repos",
+        ]
+        with patch("sys.argv", argv):
+            args = parse_args()
+        assert args.direction == "gitee2local"
+
+    def test_local_direction_requires_local_path(self):
+        argv = [
+            "sync.py",
+            "--github-owner", "ghowner",
+            "--github-token", "ghtoken",
+            "--direction", "github2local",
+        ]
+        with patch("sys.argv", argv):
+            with pytest.raises(SystemExit):
+                parse_args()
+
+    def test_local_direction_with_windows_path(self):
+        argv = [
+            "sync.py",
+            "--github-owner", "ghowner",
+            "--github-token", "ghtoken",
+            "--direction", "github2local",
+            "--local-path", "C:\\repos",
+        ]
+        with patch("sys.argv", argv):
+            args = parse_args()
+        assert args.local_path == "C:\\repos"
+
+    def test_local_direction_warns_and_clears_sync_extra(self):
+        argv = [
+            "sync.py",
+            "--github-owner", "ghowner",
+            "--github-token", "ghtoken",
+            "--direction", "github2local",
+            "--local-path", "/tmp/repos",
+            "--sync-extra", "labels,wiki",
+        ]
+        with patch("sys.argv", argv), \
+             patch("sync.logging.warning") as mock_warn:
+            args = parse_args()
+        assert args.sync_extra == set()
+        # Should have warned about ignoring sync-extra
+        warn_msgs = " ".join(str(c) for c in mock_warn.call_args_list)
+        assert "local target" in warn_msgs.lower() or \
+               "not supported" in warn_msgs.lower()
+
+    def test_default_local_path_is_empty(self):
+        argv = [
+            "sync.py",
+            "--github-owner", "ghowner",
+            "--github-token", "ghtoken",
+            "--gitee-owner", "go",
+            "--gitee-token", "gt",
+        ]
+        with patch("sys.argv", argv):
+            args = parse_args()
+        assert args.local_path == ""
+
+
+class TestSyncOneDirectionLocalTarget:
+    """sync_one_direction with target_platform='local'."""
+
+    def _common_kwargs(self, **overrides):
+        defaults = dict(
+            source_platform="github",
+            target_platform="local",
+            source_owner="ghowner",
+            target_owner="/tmp/repos",  # local path
+            source_token="ghtoken",
+            target_token="",
+            account_type="user",
+            include_private=True,
+            include_repos=set(),
+            exclude_repos=set(),
+            create_missing_repos=True,
+            sync_extra=set(),
+            dry_run=False,
+            visibility="all",
+            show_private_repo_names=False,
+            git_timeout=900,
+        )
+        defaults.update(overrides)
+        return defaults
+
+    def test_creates_missing_local_repo_and_syncs(self):
+        src = [{"name": "newrepo", "private": False, "description": ""}]
+        with patch("sync.get_github_repos", return_value=src), \
+             patch("sync.get_local_repos", return_value=[]), \
+             patch("sync.create_local_repo",
+                   return_value=True) as mock_create, \
+             patch("sync.mirror_sync", return_value="success"), \
+             patch("sync.sync_repo_metadata") as mock_meta, \
+             patch("sync.sync_extras") as mock_extras:
+            synced, failed, skipped, fr = sync_one_direction(
+                **self._common_kwargs()
+            )
+        assert synced == 1
+        mock_create.assert_called_once()
+        # local target → metadata and extras MUST NOT be called
+        mock_meta.assert_not_called()
+        mock_extras.assert_not_called()
+
+    def test_existing_local_repo_skips_create(self):
+        src = [{"name": "myrepo", "private": False}]
+        existing = [{"name": "myrepo", "private": False}]
+        with patch("sync.get_github_repos", return_value=src), \
+             patch("sync.get_local_repos", return_value=existing), \
+             patch("sync.create_local_repo") as mock_create, \
+             patch("sync.mirror_sync", return_value="success"):
+            synced, _, _, _ = sync_one_direction(**self._common_kwargs())
+        assert synced == 1
+        mock_create.assert_not_called()
+
+    def test_failed_local_repo_creation_marks_failed(self):
+        src = [{"name": "newrepo", "private": False}]
+        with patch("sync.get_github_repos", return_value=src), \
+             patch("sync.get_local_repos", return_value=[]), \
+             patch("sync.create_local_repo", return_value=False):
+            _, failed, _, fr = sync_one_direction(**self._common_kwargs())
+        assert failed == 1
+        assert len(fr) == 1
+
+    def test_sync_extra_not_called_for_local_even_if_set(self):
+        """Defense in depth: even if sync_extra slipped through, local
+        target should never call sync_extras."""
+        src = [{"name": "myrepo", "private": False}]
+        existing = [{"name": "myrepo"}]
+        with patch("sync.get_github_repos", return_value=src), \
+             patch("sync.get_local_repos", return_value=existing), \
+             patch("sync.mirror_sync", return_value="success"), \
+             patch("sync.sync_extras") as mock_extras:
+            sync_one_direction(
+                **self._common_kwargs(sync_extra={"labels"})
+            )
+        mock_extras.assert_not_called()
+
+    def test_gitee_to_local(self):
+        """gitee → local: get_gitee_repos used for source, local funcs for target."""
+        src = [{"name": "g_repo", "private": False}]
+        with patch("sync.get_gitee_repos", return_value=src), \
+             patch("sync.get_local_repos", return_value=[]), \
+             patch("sync.create_local_repo",
+                   return_value=True) as mock_create, \
+             patch("sync.mirror_sync", return_value="success"):
+            synced, _, _, _ = sync_one_direction(
+                **self._common_kwargs(source_platform="gitee")
+            )
+        assert synced == 1
+        mock_create.assert_called_once()
+
+
+class TestSyncAllLocalDirection:
+    """sync_all dispatch for new local directions."""
+
+    def _make_args(self, direction, local_path="/tmp/repos", **extra):
+        defaults = dict(
+            direction=direction,
+            github_owner="ghowner",
+            gitee_owner="giteeowner",
+            github_token="ghtoken",
+            gitee_token="giteetoken",
+            account_type="user",
+            include_private=True,
+            include_repos=set(),
+            exclude_repos=set(),
+            create_missing_repos=True,
+            sync_extra=set(),
+            dry_run=False,
+            visibility="all",
+            show_private_repo_names=False,
+            git_timeout=900,
+            local_path=local_path,
+        )
+        defaults.update(extra)
+        return Namespace(**defaults)
+
+    def test_github2local_calls_sync_once_with_local_target(self):
+        with patch("sync.sync_one_direction",
+                   return_value=(1, 0, 0, [])) as mock_sync, \
+             patch("sync.write_action_outputs"):
+            sync_all(self._make_args("github2local"))
+        assert mock_sync.call_count == 1
+        positional = mock_sync.call_args[0]
+        assert positional[0] == "github"
+        assert positional[1] == "local"
+        # target_owner should be local_path
+        assert positional[3] == "/tmp/repos"
+
+    def test_gitee2local_calls_sync_once_with_local_target(self):
+        with patch("sync.sync_one_direction",
+                   return_value=(2, 0, 0, [])) as mock_sync, \
+             patch("sync.write_action_outputs"):
+            sync_all(self._make_args("gitee2local"))
+        assert mock_sync.call_count == 1
+        positional = mock_sync.call_args[0]
+        assert positional[0] == "gitee"
+        assert positional[1] == "local"
+        assert positional[3] == "/tmp/repos"
+
+    def test_github2local_with_windows_path(self):
+        with patch("sync.sync_one_direction",
+                   return_value=(1, 0, 0, [])) as mock_sync, \
+             patch("sync.write_action_outputs"):
+            sync_all(self._make_args("github2local",
+                                     local_path="C:\\repos"))
+        positional = mock_sync.call_args[0]
+        assert positional[3] == "C:\\repos"
+
+    def test_local_target_passes_empty_sync_extra(self):
+        """Even if args.sync_extra is set, sync_all should pass empty set
+        for local target (defensive)."""
+        with patch("sync.sync_one_direction",
+                   return_value=(1, 0, 0, [])) as mock_sync, \
+             patch("sync.write_action_outputs"):
+            args = self._make_args("github2local",
+                                   sync_extra={"labels", "wiki"})
+            sync_all(args)
+        positional = mock_sync.call_args[0]
+        # sync_extra is the 11th positional arg (index 10) per current signature
+        # Use kwargs/positional mix: easier to verify by checking the call:
+        # source_platform, target_platform, source_owner, target_owner,
+        # source_token, target_token, account_type, include_private,
+        # include_repos, exclude_repos, create_missing_repos, sync_extra
+        assert positional[11] == set()

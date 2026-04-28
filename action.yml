@@ -32,7 +32,7 @@ inputs:
     required: false
     default: ''
   direction:
-    description: 'Sync direction: github2gitee, gitee2github, or both'
+    description: 'Sync direction: github2gitee, gitee2github, both, github2local, or gitee2local. The *2local variants sync repositories to a local directory specified by local-path.'
     required: false
     default: 'github2gitee'
   create-missing-repos:
@@ -67,6 +67,15 @@ inputs:
       slow/unreliable networks.
     required: false
     default: '900'
+  local-path:
+    description: >
+      Local directory path used as sync target when direction is
+      'github2local' or 'gitee2local'. Supports both Windows
+      (e.g. 'C:\repos') and Linux/macOS (e.g. '/var/repos') paths.
+      The directory will be created if it does not exist. Each repository is
+      stored as a bare repo at '<local-path>/<repo-name>.git'.
+    required: false
+    default: ''
 
 outputs:
   synced-count:

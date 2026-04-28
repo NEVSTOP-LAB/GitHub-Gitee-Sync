@@ -211,6 +211,16 @@ class TestBuildCloneUrl:
         url = build_clone_url("github", "owner", "my-special.repo")
         assert "my-special.repo" in url
 
+    def test_local_path(self, tmp_path):
+        """local platform 返回文件系统路径而非 HTTPS URL"""
+        url = build_clone_url("local", str(tmp_path), "myrepo")
+        assert url == str(tmp_path / "myrepo.git")
+        assert "://" not in url
+
+    def test_unknown_platform_raises(self):
+        with pytest.raises(ValueError):
+            build_clone_url("bitbucket", "owner", "repo")
+
 
 # ===========================================================================
 # make_git_env

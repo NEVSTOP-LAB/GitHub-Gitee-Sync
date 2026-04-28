@@ -159,6 +159,26 @@ def _refs_already_in_sync(temp_dir, target_url, tgt_env, git_timeout=None):
 
 
 
+def _is_local_target(target_url):
+    """判断 target_url 是否指向本地文件系统（而非远程 HTTPS/SSH URL）。
+
+    用于在 ``mirror_sync`` 中决定是否需要为目标侧构造带 GIT_ASKPASS 的认证
+    环境：本地目标（如 ``/repos/foo.git`` 或 ``C:\\repos\\foo.git``、
+    ``file:///...``）不需要凭据。
+    """
+    if not target_url:
+        return False
+    s = str(target_url)
+    if s.startswith("file://"):
+        return True
+    lower = s.lower()
+    for prefix in ("http://", "https://", "git://", "ssh://", "git@"):
+        if lower.startswith(prefix):
+            return False
+    # 其余视为本地文件系统路径（含 Windows 盘符如 "C:\\..."、绝对/相对路径等）
+    return True
+
+
 def mirror_sync(source_url, target_url, repo_name,
                 source_token, target_token, dry_run=False,
                 source_username="git", target_username="git",
@@ -261,8 +281,17 @@ def mirror_sync(source_url, target_url, repo_name,
                 return "empty"
 
             # --- Step 1.5: 提前初始化目标认证环境，用于 refs 比较和推送 ---
-            tgt_env, tgt_askpass = make_git_env(target_token, target_username)
-            askpass_paths.append(tgt_askpass)
+            # 对本地 target（文件系统路径）跳过 token 认证：git 不会向本地
+            # remote 发出凭据请求，使用普通环境即可。
+            if _is_local_target(target_url):
+                tgt_env = os.environ.copy()
+                # 防止 git 在本地操作中意外尝试交互式凭据输入
+                tgt_env["GIT_TERMINAL_PROMPT"] = "0"
+            else:
+                tgt_env, tgt_askpass = make_git_env(
+                    target_token, target_username
+                )
+                askpass_paths.append(tgt_askpass)
 
             # --- Step 1.6: 检查两端 refs 是否完全一致，一致则跳过推送 ---
             if _refs_already_in_sync(temp_dir, target_url, tgt_env, git_timeout):
