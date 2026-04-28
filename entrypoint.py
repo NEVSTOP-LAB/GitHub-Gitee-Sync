@@ -76,6 +76,7 @@ def main() -> None:
             "show-private-repo-names", "false"
         ),
         "GIT_TIMEOUT": _get_input("git-timeout", "900"),
+        "LOCAL_PATH": _get_input("local-path", ""),
     }
 
     for key, value in mappings.items():

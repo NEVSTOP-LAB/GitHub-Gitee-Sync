@@ -95,13 +95,14 @@ docker run --rm --env-file .env github-gitee-sync
 | 包含私有仓库 <br/> `INCLUDE_PRIVATE` | `--include-private` | ❌ | `true` | 是否同步私有仓库 |
 | 指定仓库（允许列表） <br/> `INCLUDE_REPOS` | `--include-repos` | ❌ | 空 | 逗号分隔的仓库名列表；设置后**仅同步**这些仓库，优先于排除列表 |
 | 排除仓库 <br/> `EXCLUDE_REPOS` | `--exclude-repos` | ❌ | 空 | 逗号分隔的仓库名列表；当 `include-repos` 已设置时此参数被忽略 |
-| 同步方向 <br/> `SYNC_DIRECTION` | `--direction` | ❌ | `github2gitee` | `github2gitee` / `gitee2github` / `both` |
-| 创建不存在的仓库 <br/> `CREATE_MISSING_REPOS` | `--create-missing-repos` | ❌ | `true` | 目标仓库不存在时是否自动创建 |
-| 附属信息同步 <br/> `SYNC_EXTRA` | `--sync-extra` | ❌ | 空 | 逗号分隔：`releases,wiki,labels,milestones,issues` |
+| 同步方向 <br/> `SYNC_DIRECTION` | `--direction` | ❌ | `github2gitee` | `github2gitee` / `gitee2github` / `both` / `github2local` / `gitee2local`。`*2local` 模式将仓库同步到 `--local-path` 指定的本地目录（裸仓库形式） |
+| 创建不存在的仓库 <br/> `CREATE_MISSING_REPOS` | `--create-missing-repos` | ❌ | `true` | 目标仓库不存在时是否自动创建（local target 下控制是否自动 `git init --bare`） |
+| 附属信息同步 <br/> `SYNC_EXTRA` | `--sync-extra` | ❌ | 空 | 逗号分隔：`releases,wiki,labels,milestones,issues`（local target 下不支持，会被忽略） |
 | 干运行模式 <br/> `DRY_RUN` | `--dry-run` | ❌ | `false` | 运行全部逻辑但不实际同步，用于调试和测试 |
 | 可见性过滤 <br/> `VISIBILITY` | `--visibility` | ❌ | `all` | `all` / `public` / `private`，在 include/exclude 过滤之后再次按可见性过滤仓库 |
 | 显示私有仓库名 <br/> `SHOW_PRIVATE_REPO_NAMES` | `--show-private-repo-names` | ❌ | `false` | 日志中私有仓库名的显示方式：`false` 隐藏为 `[private]`；`true` 显示完整名称；正整数 N 显示前 N 个字符（如 `3` → `[CSM****]`） |
 | Git 超时时间 <br/> `GIT_TIMEOUT` | `--git-timeout` | ❌ | `900` | 单次 git 操作的超时秒数（默认 15 分钟）；超时后自动重试一次 |
+| 本地目标路径 <br/> `LOCAL_PATH` | `--local-path` | 仅 `*2local` 方向必填 | 空 | 同步到本地的目录路径，支持 Windows（`C:\repos`）和 Linux/macOS（`/var/repos`）格式；目录不存在会自动创建，每个仓库存放为 `<local-path>/<repo>.git` 裸仓库 |
 
 ---
 
@@ -206,6 +207,38 @@ docker run --rm --env-file .env github-gitee-sync
     sync-extra: 'releases,wiki'
 - run: echo "Synced ${{ steps.sync.outputs['synced-count'] }} repos"
 ```
+
+### 同步到本地目录（local target）
+
+通过 `direction=github2local` 或 `direction=gitee2local`，可以将仓库镜像同步到本地目录，每个仓库以裸仓库（`<local-path>/<repo>.git`）的形式存放。`local-path` 同时支持 Windows 和 Linux/macOS 路径格式。
+
+```yaml
+# GitHub → 本地目录
+- uses: NEVSTOP-LAB/GitHub-Gitee-Sync@v1
+  with:
+    github-owner: myuser
+    github-token: ${{ secrets.GH_TOKEN }}
+    gitee-owner: ''        # local target 不需要 Gitee 凭据
+    gitee-token: ''
+    direction: github2local
+    local-path: /var/backup/repos       # Linux/macOS
+    # local-path: 'C:\repos\backup'     # Windows
+```
+
+```bash
+# 命令行: Gitee → 本地目录
+python sync.py \
+  --gitee-owner myuser \
+  --gitee-token <Gitee Token> \
+  --github-owner '' --github-token '' \
+  --direction gitee2local \
+  --local-path /var/backup/repos
+```
+
+> **说明**
+> - 目录不存在时会自动创建；每次同步执行 `git clone --mirror` + `git push --all/--tags --force` 增量更新本地裸仓库。
+> - `local` target 没有 API，因此 `sync-extra`（releases/wiki/labels 等）和元信息同步会被跳过。
+> - `create-missing-repos=true`（默认）时，目标本地裸仓库不存在会自动 `git init --bare` 创建；设为 `false` 则只同步本地已存在的仓库。
 
 ---
 

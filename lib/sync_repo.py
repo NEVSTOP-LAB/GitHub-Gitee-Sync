@@ -159,6 +159,44 @@ def _refs_already_in_sync(temp_dir, target_url, tgt_env, git_timeout=None):
 
 
 
+def _is_local_target(target_url):
+    """判断 target_url 是否指向本地文件系统（而非远程 HTTPS/SSH URL）。
+
+    用于在 ``mirror_sync`` 中决定是否需要为目标侧构造带 GIT_ASKPASS 的认证
+    环境：本地目标（如 ``/repos/foo.git`` 或 ``C:\\repos\\foo.git``、
+    ``file:///...``）不需要凭据。
+
+    远程检测覆盖：
+    - 标准 scheme：``http(s)://``、``git://``、``ssh://``、``file://``
+      （``file://`` 虽是本地，仍按本地处理）
+    - scp-like SSH：``[user@]host:path``（如 ``git@github.com:owner/repo.git``
+      或 ``user@host:path``、``host:path``），同时排除 Windows 盘符路径
+      （如 ``C:\\repos`` 或 ``C:/repos``）。
+    """
+    if not target_url:
+        return False
+    s = str(target_url)
+    lower = s.lower()
+    if lower.startswith("file://"):
+        return True
+    for prefix in ("http://", "https://", "git://", "ssh://"):
+        if lower.startswith(prefix):
+            return False
+    # Windows 盘符路径形如 "C:\foo" 或 "C:/foo" —— 单字母 + ':' + 分隔符
+    if (
+        len(s) >= 3
+        and s[0].isalpha()
+        and s[1] == ":"
+        and s[2] in ("\\", "/")
+    ):
+        return True
+    # scp-like SSH：``[user@]host:path``，例如 ``git@host:foo`` 或 ``host:foo``。
+    # 只要包含 ':' 且不是上面识别出的 Windows 盘符路径，就视为远程。
+    if ":" in s:
+        return False
+    return True
+
+
 def mirror_sync(source_url, target_url, repo_name,
                 source_token, target_token, dry_run=False,
                 source_username="git", target_username="git",
@@ -261,8 +299,17 @@ def mirror_sync(source_url, target_url, repo_name,
                 return "empty"
 
             # --- Step 1.5: 提前初始化目标认证环境，用于 refs 比较和推送 ---
-            tgt_env, tgt_askpass = make_git_env(target_token, target_username)
-            askpass_paths.append(tgt_askpass)
+            # 对本地 target（文件系统路径）跳过 token 认证：git 不会向本地
+            # remote 发出凭据请求，使用普通环境即可。
+            if _is_local_target(target_url):
+                tgt_env = os.environ.copy()
+                # 防止 git 在本地操作中意外尝试交互式凭据输入
+                tgt_env["GIT_TERMINAL_PROMPT"] = "0"
+            else:
+                tgt_env, tgt_askpass = make_git_env(
+                    target_token, target_username
+                )
+                askpass_paths.append(tgt_askpass)
 
             # --- Step 1.6: 检查两端 refs 是否完全一致，一致则跳过推送 ---
             if _refs_already_in_sync(temp_dir, target_url, tgt_env, git_timeout):
