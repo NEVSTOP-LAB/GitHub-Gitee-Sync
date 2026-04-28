@@ -72,8 +72,13 @@ def ensure_local_path_writable(local_path):
         logging.info(f"Creating local target directory: {p}")
         p.mkdir(parents=True, exist_ok=True)
 
-    if not os.access(str(p), os.W_OK):
-        raise PermissionError(f"local-path '{p}' is not writable")
+    # 对于目录, 同时检查写入(W_OK)与遍历(X_OK)权限。
+    # 仅 W_OK 通过但缺少 X_OK 时, 后续 git init/push 仍会失败。
+    if not os.access(str(p), os.W_OK | os.X_OK):
+        raise PermissionError(
+            f"local-path '{p}' is not writable/traversable "
+            "(requires write + execute permission for directories)"
+        )
     return p
 
 

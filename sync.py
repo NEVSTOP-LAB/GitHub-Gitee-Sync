@@ -219,7 +219,8 @@ def parse_args():
         help=(
             "Local directory path used as sync target when --direction is "
             "'github2local' or 'gitee2local'. Supports Windows "
-            "(e.g. 'C:\\\\repos') and Linux/macOS (e.g. '/var/repos') paths."
+            "(e.g. 'C:/repos' or 'C:\\repos') and Linux/macOS "
+            "(e.g. '/var/repos') paths."
         ),
     )
 
