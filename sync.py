@@ -677,6 +677,8 @@ def sync_all(args):
     # --- 同步到本地目录: GitHub → Local ---
     if direction == "github2local":
         local_path = getattr(args, "local_path", "")
+        # local target 没有 API，强制清空 sync_extra（防御性）
+        local_sync_extra = set()
         logging.info("=" * 50)
         logging.info(
             f"Syncing GitHub({args.github_owner}) → Local({local_path})"
@@ -689,7 +691,7 @@ def sync_all(args):
             args.account_type, args.include_private,
             args.include_repos, args.exclude_repos,
             args.create_missing_repos,
-            set(), dry_run,
+            local_sync_extra, dry_run,
             source_username=github_username,
             target_username="git",
             visibility=args.visibility,
@@ -704,6 +706,8 @@ def sync_all(args):
     # --- 同步到本地目录: Gitee → Local ---
     if direction == "gitee2local":
         local_path = getattr(args, "local_path", "")
+        # local target 没有 API，强制清空 sync_extra（防御性）
+        local_sync_extra = set()
         logging.info("=" * 50)
         logging.info(
             f"Syncing Gitee({args.gitee_owner}) → Local({local_path})"
@@ -716,7 +720,7 @@ def sync_all(args):
             args.account_type, args.include_private,
             args.include_repos, args.exclude_repos,
             args.create_missing_repos,
-            set(), dry_run,
+            local_sync_extra, dry_run,
             source_username=gitee_username,
             target_username="git",
             visibility=args.visibility,

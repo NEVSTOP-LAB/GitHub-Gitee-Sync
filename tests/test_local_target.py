@@ -148,15 +148,22 @@ class TestCreateLocalRepo:
         # half-baked dir should be cleaned up
         assert not (tmp_path / "repo.git").exists()
 
-    def test_uses_log_repo_name(self, tmp_path, caplog):
+    def test_uses_log_repo_name_on_failure(self, tmp_path, caplog):
+        """When git init fails, error message should reference the
+        log_repo_name (masked) rather than the raw repo name."""
         import logging
-        caplog.set_level(logging.INFO)
-        create_local_repo(str(tmp_path), "secret-repo",
-                          log_repo_name="[private]")
-        # Should not leak the real repo name in the log
-        # (path will still contain it since we log the path; log_repo_name
-        # is only used when error messages reference repo_name)
-        # We just verify the call did not raise.
+        caplog.set_level(logging.ERROR)
+        proc = MagicMock(returncode=1, stderr="boom", stdout="")
+        with patch("lib.local_target.subprocess.run", return_value=proc):
+            ok = create_local_repo(
+                str(tmp_path), "secret-repo",
+                log_repo_name="[private]",
+            )
+        assert ok is False
+        # The error log should contain the masked name, not the real one
+        messages = " ".join(rec.getMessage() for rec in caplog.records)
+        assert "[private]" in messages
+        assert "secret-repo" not in messages
 
     def test_ignored_kwargs_do_not_break(self, tmp_path):
         # private/description args from create_github_repo signature should
